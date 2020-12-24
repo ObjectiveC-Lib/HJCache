@@ -5,12 +5,9 @@ Pod::Spec.new do |s|
   s.platform     = :ios, '6.0'
   s.ios.deployment_target = '6.0'
 
-  s.summary      = 'High performance cache framework for iOS.'
-  # s.homepage        = './'
+  s.summary      = 'High performance cache framework for iOS'
   s.homepage     = 'https://github.com/ObjectiveC-Lib/HJCache'
-  # s.source       = { :path => './' , :tag => s.version }
-  s.source       = { :git => 'https://github.com/ObjectiveC-Lib/HJCache.git', :tag => '#{s.version.to_s}' }
-  # s.license      = 'MIT'
+  s.source       = { :git => 'https://github.com/ObjectiveC-Lib/HJCache.git', :tag => s.version }
   s.license      = { :type => 'MIT', :file => 'LICENSE' }
   s.author       = { 'navy' => 'lzxy169@gmail.com' }
 
