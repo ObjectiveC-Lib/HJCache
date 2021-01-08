@@ -1,6 +1,6 @@
 //
 //  HJVideoCache.m
-//  HJUpload
+//  HJCache
 //
 //  Created by navy on 2019/3/18.
 //  Copyright © 2019 navy. All rights reserved.
@@ -16,7 +16,7 @@
 #import "HJCache.h"
 #endif
 
-static inline dispatch_queue_t HJUploadVideoCacheIOQueue() {
+static inline dispatch_queue_t HJCacheVideoCacheIOQueue() {
     return dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
 }
 
@@ -158,7 +158,7 @@ static inline dispatch_queue_t HJUploadVideoCacheIOQueue() {
     dispatch_once(&onceToken, ^{
         NSString *cachePath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                                    NSUserDomainMask, YES) firstObject];
-        cachePath = [cachePath stringByAppendingPathComponent:@"HJUpload"];
+        cachePath = [cachePath stringByAppendingPathComponent:@"HJCache"];
         cachePath = [cachePath stringByAppendingPathComponent:@"Videos"];
         cache = [[self alloc] initWithPath:cachePath];
     });
@@ -166,8 +166,8 @@ static inline dispatch_queue_t HJUploadVideoCacheIOQueue() {
 }
 
 - (instancetype)init {
-    @throw [NSException exceptionWithName:@"HJUploadVideoCache init error"
-                                   reason:@"HJUploadVideoCache must be initialized with a path. Use 'initWithPath:' instead."
+    @throw [NSException exceptionWithName:@"HJVideoCache init error"
+                                   reason:@"HJVideoCache must be initialized with a path. Use 'initWithPath:' instead."
                                  userInfo:nil];
     return [self initWithPath:@""];
 }
@@ -195,7 +195,7 @@ static inline dispatch_queue_t HJUploadVideoCacheIOQueue() {
     if (!key || video == nil) return;
     
     __weak typeof(self) _self = self;
-    dispatch_async(HJUploadVideoCacheIOQueue(), ^{
+    dispatch_async(HJCacheVideoCacheIOQueue(), ^{
         __strong typeof(_self) self = _self;
         if (!self) return;
         [self videoDataRepresentation:video key:key handler:^(BOOL success) {
@@ -234,7 +234,7 @@ static inline dispatch_queue_t HJUploadVideoCacheIOQueue() {
     if (!key || path == nil) return;
     
     __weak typeof(self) _self = self;
-    dispatch_async(HJUploadVideoCacheIOQueue(), ^{
+    dispatch_async(HJCacheVideoCacheIOQueue(), ^{
         __strong typeof(_self) self = _self;
         if (!self) return;
         PHFetchResult *fetchResult = [PHAsset fetchAssetsWithALAssetURLs:@[[NSURL fileURLWithPath:path]] options:nil];

@@ -1,6 +1,6 @@
 //
 //  HJImageCache.m
-//  HJUpload
+//  HJCache
 //
 //  Created by navy on 2019/3/13.
 //  Copyright © 2019 navy. All rights reserved.
@@ -20,7 +20,7 @@
 #import "YYImage.h"
 #endif
 
-static inline dispatch_queue_t HJUploadImageCacheIOQueue() {
+static inline dispatch_queue_t HJCacheImageCacheIOQueue() {
     return dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
 }
 
@@ -60,7 +60,7 @@ static inline dispatch_queue_t HJUploadImageCacheIOQueue() {
     dispatch_once(&onceToken, ^{
         NSString *cachePath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                                    NSUserDomainMask, YES) firstObject];
-        cachePath = [cachePath stringByAppendingPathComponent:@"HJUpload"];
+        cachePath = [cachePath stringByAppendingPathComponent:@"HJCache"];
         cachePath = [cachePath stringByAppendingPathComponent:@"Images"];
         cache = [[self alloc] initWithPath:cachePath];
     });
@@ -68,8 +68,8 @@ static inline dispatch_queue_t HJUploadImageCacheIOQueue() {
 }
 
 - (instancetype)init {
-    @throw [NSException exceptionWithName:@"HJUploadImageCache init error"
-                                   reason:@"HJUploadImageCache must be initialized with a path. Use 'initWithPath:' instead."
+    @throw [NSException exceptionWithName:@"HJImageCache init error"
+                                   reason:@"HJImageCache must be initialized with a path. Use 'initWithPath:' instead."
                                  userInfo:nil];
     return [self initWithPath:@""];
 }
@@ -106,7 +106,7 @@ static inline dispatch_queue_t HJUploadImageCacheIOQueue() {
     
     __weak typeof(self) _self = self;
     if (type & HJCachesTypeMemory) { // add to memory cache
-        dispatch_async(HJUploadImageCacheIOQueue(), ^{
+        dispatch_async(HJCacheImageCacheIOQueue(), ^{
             __strong typeof(_self) self = _self;
             if (!self) return;
             [self.memoryCache setObject:image forKey:key withCost:[self imageCost:image]];
@@ -114,7 +114,7 @@ static inline dispatch_queue_t HJUploadImageCacheIOQueue() {
     }
     
     if (type & HJCachesTypeDisk) { // add to disk cache
-        dispatch_async(HJUploadImageCacheIOQueue(), ^{
+        dispatch_async(HJCacheImageCacheIOQueue(), ^{
             __strong typeof(_self) self = _self;
             if (!self) return;
             NSData *data = [image yy_imageDataRepresentation];

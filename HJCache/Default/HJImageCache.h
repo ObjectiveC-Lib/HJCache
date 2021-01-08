@@ -1,6 +1,6 @@
 //
 //  HJImageCache.h
-//  HJUpload
+//  HJCache
 //
 //  Created by navy on 2019/3/13.
 //  Copyright © 2019 navy. All rights reserved.
