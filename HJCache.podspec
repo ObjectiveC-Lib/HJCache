@@ -22,12 +22,11 @@ Pod::Spec.new do |s|
     core.source_files = 'HJCache/Core/*.{h,m}'
   end
   
-  s.subspec 'Default' do |df|
-    df.source_files = 'HJCache/Default/*.{h,m}'
-    df.framework = 'Photos', 'AVFoundation'
-    df.dependency 'HJCache/Core'
+  s.subspec 'Default' do |default|
+    default.source_files = 'HJCache/Default/*.{h,m}'
+    default.framework = 'Photos', 'AVFoundation'
+    default.dependency 'HJCache/Core'
+    default.dependency 'YYImage'
   end
-  
-  s.dependency 'YYImage'
   
 end
