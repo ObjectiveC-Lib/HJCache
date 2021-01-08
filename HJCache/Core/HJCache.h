@@ -23,9 +23,9 @@ FOUNDATION_EXPORT const unsigned char HJCacheVersionString[];
 #import "HJCacheDefine.h"
 #endif
 
-#if __has_include(<HJCache/HJDefaultCache.h>)
-#elif __has_include("HJDefaultCache.h")
-#import "HJDefaultCache.h"
+#if __has_include(<HJCache/HJCacheDefault.h>)
+#elif __has_include("HJCacheDefault.h")
+#import "HJCacheDefault.h"
 #endif
 
 #endif /* HJCache_h */
