@@ -9,6 +9,8 @@
 #import "HJVideoCache.h"
 #import <Photos/Photos.h>
 #import <AVFoundation/AVAssetImageGenerator.h>
+#import "HJMemoryCache.h"
+#import "HJDiskCache.h"
 
 static inline dispatch_queue_t HJCacheVideoCacheIOQueue() {
     return dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);

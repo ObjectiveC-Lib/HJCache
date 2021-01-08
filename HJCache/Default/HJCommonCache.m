@@ -1,15 +1,15 @@
 //
-//  HJDefaultCache.m
+//  HJCommonCache.m
 //  HJCache
 //
 //  Created by navy on 2019/3/6.
 //
 
-#import "HJDefaultCache.h"
+#import "HJCommonCache.h"
 #import "HJMemoryCache.h"
 #import "HJDiskCache.h"
 
-@implementation HJDefaultCache
+@implementation HJCommonCache
 
 #pragma mark - Initializer
 

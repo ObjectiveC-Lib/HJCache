@@ -2,54 +2,20 @@
 //  HJDefaultCache.h
 //  HJCache
 //
-//  Created by navy on 2019/3/6.
+//  Created by navy on 2021/1/8.
 //
 
-#import <Foundation/Foundation.h>
+#ifndef HJDefaultCache_h
+#define HJDefaultCache_h
 
-@class HJMemoryCache, HJDiskCache;
+#if __has_include(<HJCache/HJDefaultCache.h>)
+#import <HJCache/HJCommonCache.h>
+#import <HJCache/HJImageCache.h>
+#import <HJCache/HJVideoCache.h>
+#elif __has_include("HJDefaultCache.h")
+#import "HJCommonCache.h"
+#import "HJImageCache.h"
+#import "HJVideoCache.h"
+#endif
 
-NS_ASSUME_NONNULL_BEGIN
-
-@interface HJDefaultCache : NSObject
-
-#pragma mark - Attribute
-
-@property (copy, readonly) NSString *name;
-@property (strong, readonly) HJMemoryCache *memoryCache;
-@property (strong, readonly) HJDiskCache *diskCache;
-
-#pragma mark - Initializer
-
-- (instancetype)init UNAVAILABLE_ATTRIBUTE;
-+ (instancetype)new UNAVAILABLE_ATTRIBUTE;
-
-- (nullable instancetype)initWithName:(NSString *)name;
-- (nullable instancetype)initWithPath:(NSString *)path NS_DESIGNATED_INITIALIZER;
-
-+ (nullable instancetype)cacheWithName:(NSString *)name;
-+ (nullable instancetype)cacheWithPath:(NSString *)path;
-
-#pragma mark - Access Methods
-
-- (BOOL)containsObjectForKey:(NSString *)key;
-- (void)containsObjectForKey:(NSString *)key withBlock:(nullable void(^)(NSString *key, BOOL contains))block;
-
-- (nullable id<NSCoding>)objectForKey:(NSString *)key;
-- (void)objectForKey:(NSString *)key withBlock:(nullable void(^)(NSString *key, id<NSCoding> object))block;
-
-- (void)setObject:(nullable id<NSCoding>)object forKey:(NSString *)key;
-- (void)setObject:(nullable id<NSCoding>)object forKey:(NSString *)key withBlock:(nullable void(^)(void))block;
-
-- (void)removeObjectForKey:(NSString *)key;
-- (void)removeObjectForKey:(NSString *)key withBlock:(nullable void(^)(NSString *key))block;
-
-- (void)removeAllObjects;
-- (void)removeAllObjectsWithBlock:(void(^)(void))block;
-
-- (void)removeAllObjectsWithProgressBlock:(nullable void(^)(int removedCount, int totalCount))progress
-                                 endBlock:(nullable void(^)(BOOL error))end;
-
-@end
-
-NS_ASSUME_NONNULL_END
+#endif /* HJDefaultCache_h */

@@ -7,6 +7,8 @@
 //
 
 #import "HJImageCache.h"
+#import "HJMemoryCache.h"
+#import "HJDiskCache.h"
 
 #if __has_include(<YYImage/YYImage.h>)
 #import <YYImage/YYImage.h>
