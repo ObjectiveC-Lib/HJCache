@@ -14,7 +14,7 @@
 #pragma mark - Initializer
 
 - (instancetype)init {
-    NSLog(@"Use \"initWithName\" or \"initWithPath\" to create HJCache instance.");
+    NSLog(@"Use \"initWithName\" or \"initWithPath\" to create HJDefaultCache instance.");
     return [self initWithPath:@""];
 }
 

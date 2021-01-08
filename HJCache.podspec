@@ -27,7 +27,8 @@ Pod::Spec.new do |s|
     df.source_files = 'HJCache/Default/*.{h,m}'
     df.framework = 'Photos', 'AVFoundation'
     df.dependency 'HJCache/Core'
-    # df.dependency 'YYImage'
   end
+  
+  s.dependency 'YYImage'
   
 end
