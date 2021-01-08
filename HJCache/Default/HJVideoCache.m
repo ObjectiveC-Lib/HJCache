@@ -10,12 +10,6 @@
 #import <Photos/Photos.h>
 #import <AVFoundation/AVAssetImageGenerator.h>
 
-#if __has_include(<HJCache/HJCache.h>)
-#import <HJCache/HJCache.h>
-#else
-#import "HJCache.h"
-#endif
-
 static inline dispatch_queue_t HJCacheVideoCacheIOQueue() {
     return dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
 }

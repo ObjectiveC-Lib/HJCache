@@ -8,12 +8,6 @@
 
 #import "HJImageCache.h"
 
-#if __has_include(<HJCache/HJCache.h>)
-#import <HJCache/HJCache.h>
-#else
-#import "HJCache.h"
-#endif
-
 #if __has_include(<YYImage/YYImage.h>)
 #import <YYImage/YYImage.h>
 #else
