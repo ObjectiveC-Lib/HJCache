@@ -23,11 +23,11 @@ Pod::Spec.new do |s|
   end
   
   s.subspec 'Default' do |df|
+    # df.ios.deployment_target = '9.0'
     df.source_files = 'HJCache/Default/*.{h,m}'
-    df.ios.deployment_target = '9.0'
     df.framework = 'Photos', 'AVFoundation'
     df.dependency 'HJCache/Core'
-    df.dependency 'YYImage'
+    # df.dependency 'YYImage'
   end
   
 end

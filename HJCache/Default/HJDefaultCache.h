@@ -6,7 +6,8 @@
 //
 
 #import <Foundation/Foundation.h>
-#import "HJCache.h"
+
+@class HJMemoryCache, HJDiskCache;
 
 NS_ASSUME_NONNULL_BEGIN
 

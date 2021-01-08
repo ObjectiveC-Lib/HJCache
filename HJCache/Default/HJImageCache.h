@@ -8,7 +8,9 @@
 
 #import <Foundation/Foundation.h>
 #import <Photos/Photos.h>
-#import "HJCache.h"
+#import "HJCacheDefine.h"
+
+@class HJMemoryCache, HJDiskCache;
 
 NS_ASSUME_NONNULL_BEGIN
 
