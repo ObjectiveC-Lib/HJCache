@@ -30,38 +30,7 @@ static inline dispatch_queue_t HJCacheImageCacheIOQueue() {
 
 @implementation HJImageCache
 
-- (NSUInteger)imageCost:(UIImage *)image {
-    CGImageRef cgImage = image.CGImage;
-    if (!cgImage) return 1;
-    CGFloat height = CGImageGetHeight(cgImage);
-    size_t bytesPerRow = CGImageGetBytesPerRow(cgImage);
-    NSUInteger cost = bytesPerRow * height;
-    if (cost == 0) cost = 1;
-    return cost;
-}
-
-- (UIImage *)imageFromData:(NSData *)data {
-    CGFloat scale = [UIScreen mainScreen].scale;
-    UIImage *image;
-    YYImageDecoder *decoder = [YYImageDecoder decoderWithData:data scale:scale];
-    image = [decoder frameAtIndex:0 decodeForDisplay:YES].image;
-    return image;
-}
-
 #pragma mark - Initializer
-
-+ (instancetype)sharedCache {
-    static HJImageCache *cache = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSString *cachePath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
-                                                                   NSUserDomainMask, YES) firstObject];
-        cachePath = [cachePath stringByAppendingPathComponent:@"HJCache"];
-        cachePath = [cachePath stringByAppendingPathComponent:@"Images"];
-        cache = [[self alloc] initWithPath:cachePath];
-    });
-    return cache;
-}
 
 - (instancetype)init {
     @throw [NSException exceptionWithName:@"HJImageCache init error"
@@ -71,7 +40,11 @@ static inline dispatch_queue_t HJCacheImageCacheIOQueue() {
 }
 
 - (instancetype)initWithPath:(NSString *)path {
+    if (path.length == 0) return nil;
+    NSString *name = [path lastPathComponent];
+
     HJMemoryCache *memoryCache = [HJMemoryCache new];
+    memoryCache.name = name;
     memoryCache.shouldRemoveAllObjectsOnMemoryWarning = YES;
     memoryCache.shouldRemoveAllObjectsWhenEnteringBackground = YES;
     memoryCache.countLimit = NSUIntegerMax;
@@ -79,6 +52,7 @@ static inline dispatch_queue_t HJCacheImageCacheIOQueue() {
     memoryCache.ageLimit = 12 * 60 * 60;
     
     HJDiskCache *diskCache = [[HJDiskCache alloc] initWithPath:path];
+    diskCache.name = name;
     diskCache.customArchiveBlock = ^(id object) { return (NSData *)object; };
     diskCache.customUnarchiveBlock = ^(NSData *data) { return (id)data; };
     diskCache.customFileNameBlock = ^NSString * _Nonnull(NSString * _Nonnull key) { return [self getFileNameForKey:key]; };
@@ -89,6 +63,19 @@ static inline dispatch_queue_t HJCacheImageCacheIOQueue() {
     _diskCache = diskCache;
     _path = [path copy];
     return self;
+}
+
++ (instancetype)sharedCache {
+    static HJImageCache *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString *cachePath = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory,
+                                                                   NSUserDomainMask, YES) firstObject];
+        cachePath = [cachePath stringByAppendingPathComponent:@"HJCache"];
+        cachePath = [cachePath stringByAppendingPathComponent:@"Images"];
+        cache = [[self alloc] initWithPath:cachePath];
+    });
+    return cache;
 }
 
 #pragma mark - Image Access Methods
@@ -245,6 +232,26 @@ static inline dispatch_queue_t HJCacheImageCacheIOQueue() {
     
     NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
     return [[attributes objectForKey:NSFileSize] unsignedLongLongValue];
+}
+
+#pragma mark - Private
+
+- (NSUInteger)imageCost:(UIImage *)image {
+    CGImageRef cgImage = image.CGImage;
+    if (!cgImage) return 1;
+    CGFloat height = CGImageGetHeight(cgImage);
+    size_t bytesPerRow = CGImageGetBytesPerRow(cgImage);
+    NSUInteger cost = bytesPerRow * height;
+    if (cost == 0) cost = 1;
+    return cost;
+}
+
+- (UIImage *)imageFromData:(NSData *)data {
+    CGFloat scale = [UIScreen mainScreen].scale;
+    UIImage *image;
+    YYImageDecoder *decoder = [YYImageDecoder decoderWithData:data scale:scale];
+    image = [decoder frameAtIndex:0 decodeForDisplay:YES].image;
+    return image;
 }
 
 @end

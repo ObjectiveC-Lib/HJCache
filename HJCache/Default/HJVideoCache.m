@@ -25,141 +25,7 @@ static inline dispatch_queue_t HJCacheVideoCacheIOQueue() {
 
 @implementation HJVideoCache
 
-- (void)videoDataRepresentation:(PHAsset *)asset handler:(void (^)(NSData *data))handler {
-    if (!asset) return;
-    
-    [HJVideoCache getVideoWithAsset:asset progressHandler:nil completion:^(AVPlayerItem *playerItem, NSDictionary *info) {
-        AVURLAsset *urlAsset = (AVURLAsset *)playerItem.asset;
-        NSURL *url = urlAsset.URL;
-        NSData *data = [NSData dataWithContentsOfURL:url];
-        if (handler) {
-            handler(data);
-        }
-    }];
-}
-
-- (void)videoDataRepresentation:(PHAsset *)video key:(NSString *)key handler:(void (^)(BOOL success))handler {
-    if (!video) return;
-    
-    NSString *path = [self getPathForKey:key];
-    
-    [HJVideoCache getVideoWithAsset:video progressHandler:nil completion:^(AVPlayerItem *playerItem, NSDictionary *info) {
-        NSArray *export = [AVAssetExportSession exportPresetsCompatibleWithAsset:playerItem.asset];
-        NSString *quality = AVAssetExportPresetMediumQuality;
-        if ([export containsObject:quality]) {
-            AVAssetExportSession *exportSession = [[AVAssetExportSession alloc]initWithAsset:playerItem.asset presetName:quality];
-            exportSession.outputURL = [NSURL fileURLWithPath:path];
-            exportSession.shouldOptimizeForNetworkUse = YES;
-            exportSession.outputFileType = AVFileTypeMPEG4;
-            [exportSession exportAsynchronouslyWithCompletionHandler:^{
-                AVAssetExportSessionStatus status = [exportSession status];
-                if (status == AVAssetExportSessionStatusCompleted) {
-                    if (handler) {
-                        handler(YES);
-                    }
-                } else if (status == AVAssetExportSessionStatusFailed) {
-                    if (handler) {
-                        handler(NO);
-                    }
-                }
-            }];
-        }
-    }];
-}
-
-+ (void)getVideoWithAsset:(PHAsset *)asset
-          progressHandler:(void (^)(double progress, NSError *error, BOOL *stop, NSDictionary *info))progressHandler
-               completion:(void (^)(AVPlayerItem *playerItem, NSDictionary *info))completion {
-    PHVideoRequestOptions *option = [[PHVideoRequestOptions alloc] init];
-    option.networkAccessAllowed = YES;
-    option.progressHandler = ^(double progress, NSError *error, BOOL *stop, NSDictionary *info) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (progressHandler) {
-                progressHandler(progress, error, stop, info);
-            }
-        });
-    };
-    [[PHImageManager defaultManager] requestPlayerItemForVideo:asset
-                                                       options:option
-                                                 resultHandler:^(AVPlayerItem *playerItem, NSDictionary *info) {
-        if (completion) completion(playerItem,info);
-    }];
-}
-
-+ (UIImage *)getImageForVideo:(NSURL *)videoURL {
-    if (!videoURL) return nil;
-    
-    AVURLAsset *asset = [[AVURLAsset alloc] initWithURL:videoURL options:nil];
-    if (!asset) return nil;
-    
-    AVAssetImageGenerator *assetImageGenerator = [[AVAssetImageGenerator alloc] initWithAsset:asset];
-    assetImageGenerator.appliesPreferredTrackTransform = YES;
-    assetImageGenerator.apertureMode = AVAssetImageGeneratorApertureModeEncodedPixels;
-    
-    CGImageRef imageRef = NULL;
-    CFTimeInterval imageTime = 0;
-    NSError *error = nil;
-    imageRef = [assetImageGenerator copyCGImageAtTime:CMTimeMake(imageTime, 60) actualTime:NULL error:&error];
-    
-    UIImage *image = imageRef ? [[UIImage alloc] initWithCGImage:imageRef] : nil;
-    return image;
-}
-
-+ (void)generateImageFromVideo:(NSURL *)url
-                     completed:(void (^)(UIImage * _Nullable image, BOOL isSucc))completed {
-    if (!url) {
-        if (completed) {
-            completed(nil, NO);
-        }
-        return;
-    }
-    
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        AVURLAsset *asset = [[AVURLAsset alloc] initWithURL:url options:nil];
-        if (asset.isExportable) {
-            AVAssetImageGenerator *generator = [[AVAssetImageGenerator alloc] initWithAsset:asset];
-            generator.appliesPreferredTrackTransform = YES;
-            generator.apertureMode = AVAssetImageGeneratorApertureModeEncodedPixels;
-            [generator generateCGImagesAsynchronouslyForTimes:@[[NSValue valueWithCMTime:CMTimeMake(2, 1)]]
-                                            completionHandler:^(CMTime requestedTime, CGImageRef  _Nullable image, CMTime actualTime, AVAssetImageGeneratorResult result, NSError * _Nullable error) {
-                if (image && result == AVAssetImageGeneratorSucceeded) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        if (completed) {
-                            completed(nil, NO);
-                        }
-                    });
-                } else {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        if (completed) {
-                            completed([[UIImage alloc] initWithCGImage:image], YES);
-                        }
-                    });
-                }
-            }];
-        } else {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (completed) {
-                    completed(nil, NO);
-                }
-            });
-        }
-    });
-}
-
 #pragma mark - Initializer
-
-+ (instancetype)sharedCache {
-    static HJVideoCache *cache = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSString *cachePath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
-                                                                   NSUserDomainMask, YES) firstObject];
-        cachePath = [cachePath stringByAppendingPathComponent:@"HJCache"];
-        cachePath = [cachePath stringByAppendingPathComponent:@"Videos"];
-        cache = [[self alloc] initWithPath:cachePath];
-    });
-    return cache;
-}
 
 - (instancetype)init {
     @throw [NSException exceptionWithName:@"HJVideoCache init error"
@@ -169,7 +35,11 @@ static inline dispatch_queue_t HJCacheVideoCacheIOQueue() {
 }
 
 - (instancetype)initWithPath:(NSString *)path {
+    if (path.length == 0) return nil;
+    NSString *name = [path lastPathComponent];
+    
     HJDiskCache *diskCache = [[HJDiskCache alloc] initWithPath:path];
+    diskCache.name = name;
     diskCache.customArchiveBlock = ^(id object) { return (NSData *)object; };
     diskCache.customUnarchiveBlock = ^(NSData *data) { return (id)data; };
     diskCache.customFileNameBlock = ^NSString * _Nonnull(NSString * _Nonnull key) { return [self getFileNameForKey:key]; };
@@ -179,6 +49,19 @@ static inline dispatch_queue_t HJCacheVideoCacheIOQueue() {
     _diskCache = diskCache;
     _path = [path copy];
     return self;
+}
+
++ (instancetype)sharedCache {
+    static HJVideoCache *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString *cachePath = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory,
+                                                                   NSUserDomainMask, YES) firstObject];
+        cachePath = [cachePath stringByAppendingPathComponent:@"HJCache"];
+        cachePath = [cachePath stringByAppendingPathComponent:@"Videos"];
+        cache = [[self alloc] initWithPath:cachePath];
+    });
+    return cache;
 }
 
 #pragma mark - Access Methods
@@ -336,6 +219,129 @@ static inline dispatch_queue_t HJCacheVideoCacheIOQueue() {
     
     NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
     return [[attributes objectForKey:NSFileSize] unsignedLongLongValue];
+}
+
+#pragma mark - Private
+
+- (void)videoDataRepresentation:(PHAsset *)asset handler:(void (^)(NSData *data))handler {
+    if (!asset) return;
+    
+    [HJVideoCache getVideoWithAsset:asset progressHandler:nil completion:^(AVPlayerItem *playerItem, NSDictionary *info) {
+        AVURLAsset *urlAsset = (AVURLAsset *)playerItem.asset;
+        NSURL *url = urlAsset.URL;
+        NSData *data = [NSData dataWithContentsOfURL:url];
+        if (handler) {
+            handler(data);
+        }
+    }];
+}
+
+- (void)videoDataRepresentation:(PHAsset *)video key:(NSString *)key handler:(void (^)(BOOL success))handler {
+    if (!video) return;
+    
+    NSString *path = [self getPathForKey:key];
+    
+    [HJVideoCache getVideoWithAsset:video progressHandler:nil completion:^(AVPlayerItem *playerItem, NSDictionary *info) {
+        NSArray *export = [AVAssetExportSession exportPresetsCompatibleWithAsset:playerItem.asset];
+        NSString *quality = AVAssetExportPresetMediumQuality;
+        if ([export containsObject:quality]) {
+            AVAssetExportSession *exportSession = [[AVAssetExportSession alloc]initWithAsset:playerItem.asset presetName:quality];
+            exportSession.outputURL = [NSURL fileURLWithPath:path];
+            exportSession.shouldOptimizeForNetworkUse = YES;
+            exportSession.outputFileType = AVFileTypeMPEG4;
+            [exportSession exportAsynchronouslyWithCompletionHandler:^{
+                AVAssetExportSessionStatus status = [exportSession status];
+                if (status == AVAssetExportSessionStatusCompleted) {
+                    if (handler) {
+                        handler(YES);
+                    }
+                } else if (status == AVAssetExportSessionStatusFailed) {
+                    if (handler) {
+                        handler(NO);
+                    }
+                }
+            }];
+        }
+    }];
+}
+
++ (void)getVideoWithAsset:(PHAsset *)asset
+          progressHandler:(void (^)(double progress, NSError *error, BOOL *stop, NSDictionary *info))progressHandler
+               completion:(void (^)(AVPlayerItem *playerItem, NSDictionary *info))completion {
+    PHVideoRequestOptions *option = [[PHVideoRequestOptions alloc] init];
+    option.networkAccessAllowed = YES;
+    option.progressHandler = ^(double progress, NSError *error, BOOL *stop, NSDictionary *info) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (progressHandler) {
+                progressHandler(progress, error, stop, info);
+            }
+        });
+    };
+    [[PHImageManager defaultManager] requestPlayerItemForVideo:asset
+                                                       options:option
+                                                 resultHandler:^(AVPlayerItem *playerItem, NSDictionary *info) {
+        if (completion) completion(playerItem,info);
+    }];
+}
+
++ (UIImage *)getImageForVideo:(NSURL *)videoURL {
+    if (!videoURL) return nil;
+    
+    AVURLAsset *asset = [[AVURLAsset alloc] initWithURL:videoURL options:nil];
+    if (!asset) return nil;
+    
+    AVAssetImageGenerator *assetImageGenerator = [[AVAssetImageGenerator alloc] initWithAsset:asset];
+    assetImageGenerator.appliesPreferredTrackTransform = YES;
+    assetImageGenerator.apertureMode = AVAssetImageGeneratorApertureModeEncodedPixels;
+    
+    CGImageRef imageRef = NULL;
+    CFTimeInterval imageTime = 0;
+    NSError *error = nil;
+    imageRef = [assetImageGenerator copyCGImageAtTime:CMTimeMake(imageTime, 60) actualTime:NULL error:&error];
+    
+    UIImage *image = imageRef ? [[UIImage alloc] initWithCGImage:imageRef] : nil;
+    return image;
+}
+
++ (void)generateImageFromVideo:(NSURL *)url
+                     completed:(void (^)(UIImage * _Nullable image, BOOL isSucc))completed {
+    if (!url) {
+        if (completed) {
+            completed(nil, NO);
+        }
+        return;
+    }
+    
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        AVURLAsset *asset = [[AVURLAsset alloc] initWithURL:url options:nil];
+        if (asset.isExportable) {
+            AVAssetImageGenerator *generator = [[AVAssetImageGenerator alloc] initWithAsset:asset];
+            generator.appliesPreferredTrackTransform = YES;
+            generator.apertureMode = AVAssetImageGeneratorApertureModeEncodedPixels;
+            [generator generateCGImagesAsynchronouslyForTimes:@[[NSValue valueWithCMTime:CMTimeMake(2, 1)]]
+                                            completionHandler:^(CMTime requestedTime, CGImageRef  _Nullable image, CMTime actualTime, AVAssetImageGeneratorResult result, NSError * _Nullable error) {
+                if (image && result == AVAssetImageGeneratorSucceeded) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (completed) {
+                            completed(nil, NO);
+                        }
+                    });
+                } else {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (completed) {
+                            completed([[UIImage alloc] initWithCGImage:image], YES);
+                        }
+                    });
+                }
+            }];
+        } else {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (completed) {
+                    completed(nil, NO);
+                }
+            });
+        }
+    });
 }
 
 @end

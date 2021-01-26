@@ -14,39 +14,41 @@
 #pragma mark - Initializer
 
 - (instancetype)init {
-    NSLog(@"Use \"initWithName\" or \"initWithPath\" to create HJDefaultCache instance.");
+    @throw [NSException exceptionWithName:@"HJCommonCache init error"
+                                   reason:@"HJCommonCache must be initialized with a path. Use 'initWithPath:' instead."
+                                 userInfo:nil];
     return [self initWithPath:@""];
-}
-
-- (nullable instancetype)initWithName:(NSString *)name {
-    if (name.length == 0) return nil;
-    NSString *cacheFolder = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *path = [cacheFolder stringByAppendingPathComponent:name];
-    return [self initWithPath:path];
 }
 
 - (nullable instancetype)initWithPath:(NSString *)path {
     if (path.length == 0) return nil;
-    HJDiskCache *diskCache = [[HJDiskCache alloc] initWithPath:path];
-    if (!diskCache) return nil;
+    
     NSString *name = [path lastPathComponent];
+    HJDiskCache *diskCache = [[HJDiskCache alloc] initWithPath:path];
+    diskCache.name = name;
+    
     HJMemoryCache *memoryCache = [HJMemoryCache new];
     memoryCache.name = name;
-
+    if (!diskCache || !memoryCache) return nil;
+    
     self = [super init];
-    _name = name;
     _diskCache = diskCache;
     _memoryCache = memoryCache;
-
+    
     return self;
 }
 
-+ (nullable instancetype)cacheWithName:(NSString *)name {
-    return [[self alloc] initWithName:name];
-}
-
-+ (nullable instancetype)cacheWithPath:(NSString *)path {
-    return [[self alloc] initWithPath:path];
++ (instancetype)sharedCache {
+    static HJCommonCache *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString *cachePath = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory,
+                                                                   NSUserDomainMask, YES) firstObject];
+        cachePath = [cachePath stringByAppendingPathComponent:@"HJCache"];
+        cachePath = [cachePath stringByAppendingPathComponent:@"HJCommonCache"];
+        cache = [[self alloc] initWithPath:cachePath];
+    });
+    return cache;
 }
 
 #pragma mark - Access Methods
@@ -129,11 +131,6 @@
                                  endBlock:(nullable void(^)(BOOL error))end {
     [_memoryCache removeAllObjects];
     [_diskCache removeAllObjectsWithProgressBlock:progress endBlock:end];
-}
-
-- (NSString *)description {
-    if (_name) return [NSString stringWithFormat:@"<%@: %p> (%@)", self.class, self, _name];
-    else return [NSString stringWithFormat:@"<%@: %p>", self.class, self];
 }
 
 @end
