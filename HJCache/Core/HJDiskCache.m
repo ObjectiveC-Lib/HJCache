@@ -28,19 +28,30 @@ static int64_t _HJDiskSpaceFree() {
 }
 
 /// String's md5 hash.
-static NSString *_HJNSStringMD5(NSString *string) {
-    if (!string) return nil;
-    NSData *data = [string dataUsingEncoding:NSUTF8StringEncoding];
-    unsigned char result[CC_MD5_DIGEST_LENGTH];
-    CC_MD5(data.bytes, (CC_LONG)data.length, result);
-    return [NSString stringWithFormat:
-            @"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
-            result[0],  result[1],  result[2],  result[3],
-            result[4],  result[5],  result[6],  result[7],
-            result[8],  result[9],  result[10], result[11],
-            result[12], result[13], result[14], result[15]
-            ];
+#define SD_MAX_FILE_EXTENSION_LENGTH (NAME_MAX - CC_MD5_DIGEST_LENGTH * 2 - 1)
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+static inline NSString * _Nonnull _HJFileNameForKey(NSString * _Nullable key) {
+    const char *str = key.UTF8String;
+    if (str == NULL) {
+        str = "";
+    }
+    unsigned char r[CC_MD5_DIGEST_LENGTH];
+    CC_MD5(str, (CC_LONG)strlen(str), r);
+    NSURL *keyURL = [NSURL URLWithString:key];
+    NSString *ext = keyURL ? keyURL.pathExtension : key.pathExtension;
+    // File system has file name length limit, we need to check if ext is too long, we don't add it to the filename
+    if (ext.length > SD_MAX_FILE_EXTENSION_LENGTH) {
+        ext = nil;
+    }
+    NSString *filename = [NSString stringWithFormat:@"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%@",
+                          r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10],
+                          r[11], r[12], r[13], r[14], r[15], ext.length == 0 ? @"" : [NSString stringWithFormat:@".%@", ext]];
+    return filename;
 }
+#pragma clang diagnostic pop
+
 
 /// weak reference for all instances
 static NSMapTable *_globalInstances;
@@ -145,7 +156,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
 - (NSString *)_filenameForKey:(NSString *)key {
     NSString *filename = nil;
     if (_customFileNameBlock)  filename = _customFileNameBlock(key);
-    if (!filename) filename = _HJNSStringMD5(key);
+    if (!filename) filename = _HJFileNameForKey(key);
     return filename;
 }
 
