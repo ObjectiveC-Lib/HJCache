@@ -705,7 +705,8 @@ static UIApplication *_HJSharedApplication() {
 #pragma mark - Save Items
 
 - (BOOL)saveItem:(HJKVStorageItem *)item {
-    return [self saveItemWithKey:item.key value:item.value filename:item.filename extendedData:item.extendedData];
+    return [self saveItemWithKey:item.key value:item.value
+                        filename:item.filename extendedData:item.extendedData];
 }
 
 - (BOOL)saveItemWithKey:(NSString *)key value:(NSData *)value {

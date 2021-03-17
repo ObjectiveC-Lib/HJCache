@@ -28,7 +28,7 @@ static int64_t _HJDiskSpaceFree() {
 }
 
 /// String's md5 hash.
-#define SD_MAX_FILE_EXTENSION_LENGTH (NAME_MAX - CC_MD5_DIGEST_LENGTH * 2 - 1)
+#define HJ_MAX_FILE_EXTENSION_LENGTH (NAME_MAX - CC_MD5_DIGEST_LENGTH * 2 - 1)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -42,7 +42,7 @@ static inline NSString * _Nonnull _HJFileNameForKey(NSString * _Nullable key) {
     NSURL *keyURL = [NSURL URLWithString:key];
     NSString *ext = keyURL ? keyURL.pathExtension : key.pathExtension;
     // File system has file name length limit, we need to check if ext is too long, we don't add it to the filename
-    if (ext.length > SD_MAX_FILE_EXTENSION_LENGTH) {
+    if (ext.length > HJ_MAX_FILE_EXTENSION_LENGTH) {
         ext = nil;
     }
     NSString *filename = [NSString stringWithFormat:@"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%@",
@@ -250,13 +250,28 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     if (!item.value) return nil;
 
     id object = nil;
-    if (_customArchiveBlock) {
+    if (_customUnarchiveBlock) {
         object = _customUnarchiveBlock(item.value);
     } else {
-        @try {
-            object = [NSKeyedUnarchiver unarchiveObjectWithData:item.value];
-        } @catch (NSException *exception) {
+        if (@available(iOS 11, tvOS 11, macOS 10.13, watchOS 4, *)) {
+            NSError *error;
+            NSKeyedUnarchiver *unarchiver = [[NSKeyedUnarchiver alloc] initForReadingFromData:item.value error:&error];
+            unarchiver.requiresSecureCoding = NO;
+            object = [unarchiver decodeTopLevelObjectForKey:NSKeyedArchiveRootObjectKey error:&error];
+            if (error) {
+                NSLog(@"NSKeyedUnarchiver unarchive failed with error: %@", error);
+            }
+        } else {
+            @try {
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                object = [NSKeyedUnarchiver unarchiveObjectWithData:item.value];
+    #pragma clang diagnostic pop
+            } @catch (NSException *exception) {
+                NSLog(@"NSKeyedUnarchiver unarchive failed with exception: %@", exception);
+            }
         }
+
     }
     if (object && item.extendedData) {
         [HJDiskCache setExtendedData:item.extendedData toObject:object];
@@ -287,9 +302,21 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     if (_customArchiveBlock) {
         value = _customArchiveBlock(object);
     } else {
-        @try {
-            value = [NSKeyedArchiver archivedDataWithRootObject:object];
-        } @catch (NSException *exception) {
+        if (@available(iOS 11, tvOS 11, macOS 10.13, watchOS 4, *)) {
+            NSError *error;
+            value = [NSKeyedArchiver archivedDataWithRootObject:object requiringSecureCoding:NO error:&error];
+            if (error) {
+                NSLog(@"NSKeyedArchiver archive failed with error: %@", error);
+            }
+        } else {
+            @try {
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                value = [NSKeyedArchiver archivedDataWithRootObject:object];
+    #pragma clang diagnostic pop
+            } @catch (NSException *exception) {
+                NSLog(@"NSKeyedArchiver archive failed with exception: %@", exception);
+            }
         }
     }
     if (!value) return;
@@ -303,7 +330,6 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     Lock();
     [_kv saveItemWithKey:key value:value filename:filename extendedData:extendedData];
     Unlock();
-
 }
 
 - (void)setObject:(nullable id<NSCoding>)object forKey:(NSString *)key withBlock:(void(^)(void))block {
@@ -360,7 +386,6 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
         Unlock();
     });
 }
-
 
 - (NSInteger)totalCount {
     Lock();
