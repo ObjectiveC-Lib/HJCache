@@ -40,7 +40,7 @@
 }
 
 - (NSData *)dataForKey:(NSString *)key {
-    id<NSObject, NSCoding> object = [self objectForKey:key];
+    id<NSObject, NSCoding> object = (id<NSObject, NSCoding>)[self objectForKey:key];
     if ([object isKindOfClass:[NSData class]]) {
         return (NSData *)object;
     } else {
@@ -50,19 +50,19 @@
 
 - (void)setData:(NSData *)data forKey:(NSString *)key {
     if (!data) {
-        return; // YYDiskCache will remove object if `data` is nil
+        return; // HJDiskCache will remove object if `data` is nil
     }
     
     [self setObject:data forKey:key];
 }
 
 - (NSData *)extendedDataForKey:(NSString *)key {
-    id<NSObject, NSCoding> object = [self objectForKey:key];
+    id<NSObject, NSCoding> object = (id<NSObject, NSCoding>)[self objectForKey:key];
     return [self.class getExtendedDataFromObject:object];
 }
 
 - (void)setExtendedData:(NSData *)extendedData forKey:(NSString *)key {
-    id<NSObject, NSCoding> object = [self objectForKey:key];
+    id<NSObject, NSCoding> object = (id<NSObject, NSCoding>)[self objectForKey:key];
     [self.class setExtendedData:nil toObject:object];
     [self setObject:object forKey:key];
 }

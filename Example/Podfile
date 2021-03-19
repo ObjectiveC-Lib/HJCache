@@ -9,5 +9,6 @@ target 'HJCacheDemo' do
 
   pod 'HJCache', :path => '../'
   pod 'HJCache/Default', :path => '../'
+  pod 'HJCache/SDBridge', :path => '../'
 
 end
