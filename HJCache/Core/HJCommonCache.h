@@ -15,6 +15,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 #pragma mark - Attribute
 
+@property (copy, readonly) NSString *name;
 @property (strong, readonly) HJMemoryCache *memoryCache;
 @property (strong, readonly) HJDiskCache *diskCache;
 
@@ -22,7 +23,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (instancetype)new UNAVAILABLE_ATTRIBUTE;
 - (instancetype)init UNAVAILABLE_ATTRIBUTE;
+
+- (nullable instancetype)initWithName:(NSString *)name;
 - (nullable instancetype)initWithPath:(NSString *)path NS_DESIGNATED_INITIALIZER;
+
++ (nullable instancetype)cacheWithName:(NSString *)name;
++ (nullable instancetype)cacheWithPath:(NSString *)path;
+
 + (instancetype)sharedCache;
 
 #pragma mark - Access Methods

@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = 'HJCache'
-  s.version      = '1.0.1'
+  s.version      = '1.0.2'
   
 #  s.platform     = :ios, '6.0'
   s.ios.deployment_target = '6.0'
@@ -27,6 +27,12 @@ Pod::Spec.new do |s|
     default.framework = 'Photos', 'AVFoundation'
     default.dependency 'HJCache/Core'
     default.dependency 'YYImage'
+  end
+  
+  s.subspec 'SDBridge' do |sdbridge|
+    sdbridge.source_files = 'HJCache/SDBridge/*.{h,m}'
+    sdbridge.dependency 'HJCache/Core'
+    sdbridge.dependency 'SDWebImage'
   end
   
 end

@@ -9,11 +9,9 @@
 #define HJCacheDefault_h
 
 #if __has_include(<HJCache/HJCacheDefault.h>)
-#import <HJCache/HJCommonCache.h>
 #import <HJCache/HJImageCache.h>
 #import <HJCache/HJVideoCache.h>
 #elif __has_include("HJCacheDefault.h")
-#import "HJCommonCache.h"
 #import "HJImageCache.h"
 #import "HJVideoCache.h"
 #endif
