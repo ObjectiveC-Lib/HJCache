@@ -25,12 +25,16 @@
     return [self initWithPath:path];
 }
 
-- (nullable instancetype)initWithPath:(NSString *)path {
+- (instancetype)initWithPath:(NSString *)path {
+    return [self initWithPath:path threshold:1024 * 20]; // 20KB
+}
+
+- (instancetype)initWithPath:(NSString *)path threshold:(NSUInteger)threshold {
     if (path.length == 0) return nil;
     
     NSString *name = [path lastPathComponent];
     
-    HJDiskCache *diskCache = [[HJDiskCache alloc] initWithPath:path];
+    HJDiskCache *diskCache = [[HJDiskCache alloc] initWithPath:path inlineThreshold:threshold];
     if (!diskCache) return nil;
     diskCache.name = name;
     

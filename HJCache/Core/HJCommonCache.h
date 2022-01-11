@@ -25,12 +25,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)init UNAVAILABLE_ATTRIBUTE;
 
 - (nullable instancetype)initWithName:(NSString *)name;
-- (nullable instancetype)initWithPath:(NSString *)path NS_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithPath:(NSString *)path;
+- (nullable instancetype)initWithPath:(NSString *)path threshold:(NSUInteger)threshold NS_DESIGNATED_INITIALIZER;
 
 + (nullable instancetype)cacheWithName:(NSString *)name;
 + (nullable instancetype)cacheWithPath:(NSString *)path;
-
-+ (instancetype)sharedCache;
 
 #pragma mark - Access Methods
 

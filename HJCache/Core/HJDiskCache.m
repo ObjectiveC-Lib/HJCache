@@ -183,8 +183,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     return [self initWithPath:path inlineThreshold:1024 * 20]; // 20KB
 }
 
-- (nullable instancetype)initWithPath:(NSString *)path
-                      inlineThreshold:(NSUInteger)threshold {
+- (nullable instancetype)initWithPath:(NSString *)path inlineThreshold:(NSUInteger)threshold {
     self = [super init];
     if (!self) return nil;
 
