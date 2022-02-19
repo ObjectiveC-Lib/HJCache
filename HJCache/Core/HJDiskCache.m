@@ -289,14 +289,18 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
 }
 
 
-- (void)setObject:(nullable id<NSCoding>)object forKey:(NSString *)key {
+- (void)setObject:(id)object forKey:(NSString *)key {
     if (!key) return;
     if (!object) {
         [self removeObjectForKey:key];
         return;
     }
-
+    
+    if (![object conformsToProtocol:@protocol(NSCoding)]) return;
+    
     NSData *extendedData = [HJDiskCache getExtendedDataFromObject:object];
+    if (extendedData) if (![extendedData conformsToProtocol:@protocol(NSCoding)]) return;
+    
     NSData *value = nil;
     if (_customArchiveBlock) {
         value = _customArchiveBlock(object);
@@ -319,8 +323,13 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
         }
     }
     if (!value) return;
+    
+    Lock();
+    HJKVStorageType type = _kv.type;
+    Unlock();
+    
     NSString *filename = nil;
-    if (_kv.type != HJKVStorageTypeSQLite) {
+    if (type != HJKVStorageTypeSQLite) {
         if (value.length > _inlineThreshold) {
             filename = [self _filenameForKey:key];
         }
