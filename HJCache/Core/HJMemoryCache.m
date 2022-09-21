@@ -49,7 +49,7 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
 @implementation _HJLinkedMap
 
 - (void)dealloc {
-    CFRelease(_dic);
+    if (_dic) CFRelease(_dic);
 }
 
 - (instancetype)init {
@@ -75,7 +75,7 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
 
 - (void)bringNodeToHead:(_HJLinkedMapNode *)node {
     if (_head == node) return;
-
+    
     if (_tail == node) {
         _tail = node->_prev;
         _tail->_next = nil;
@@ -83,7 +83,7 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
         node->_next->_prev = node->_prev;
         node->_prev->_next = node->_next;
     }
-
+    
     node->_next = _head;
     node->_prev = nil;
     _head->_prev = node;
@@ -92,7 +92,7 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
 
 - (void)removeNode:(_HJLinkedMapNode *)node {
     CFDictionaryRemoveValue(_dic, (__bridge const void*)(node->_key));
-    _totalCount -= node->_cost;
+    _totalCost -= node->_cost;
     _totalCount--;
     if (node->_next) node->_next->_prev = node->_prev;
     if (node->_prev) node->_prev->_next = node->_next;
@@ -102,7 +102,7 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
 
 - (_HJLinkedMapNode *)removeTailNode {
     if (!_tail) return nil;
-
+    
     _HJLinkedMapNode *tail = _tail;
     CFDictionaryRemoveValue(_dic, (__bridge const void *)(_tail->_key));
     _totalCost -= _tail->_cost;
@@ -121,10 +121,10 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
     _totalCount = 0;
     _head = nil;
     _tail = nil;
-    if (CFDictionaryGetCount(_dic) > 0) {
+    if (_dic && CFDictionaryGetCount(_dic) > 0) {
         CFMutableDictionaryRef holder = _dic;
         _dic = CFDictionaryCreateMutable(CFAllocatorGetDefault(), 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-
+        
         if (_releaseAsynchronously) {
             dispatch_queue_t queue = _releaseOnMainThread ? dispatch_get_main_queue():HJMemoryCacheGetReleaseQueue();
             dispatch_async(queue, ^{
@@ -180,7 +180,7 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
     }
     pthread_mutex_unlock(&_lock);
     if (finish) return;
-
+    
     NSMutableArray *holder = [NSMutableArray new];
     while (!finish) {
         if (pthread_mutex_trylock(&_lock) == 0) {
@@ -214,7 +214,7 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
     }
     pthread_mutex_unlock(&_lock);
     if (finish) return;
-
+    
     NSMutableArray *holder = [NSMutableArray new];
     while (!finish) {
         if (pthread_mutex_trylock(&_lock) == 0) {
@@ -249,7 +249,7 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
     }
     pthread_mutex_unlock(&_lock);
     if (finish) return;
-
+    
     NSMutableArray *holder = [NSMutableArray new];
     while (!finish) {
         if (pthread_mutex_trylock(&_lock) == 0) {
@@ -306,14 +306,14 @@ static inline dispatch_queue_t HJMemoryCacheGetReleaseQueue() {
     pthread_mutex_init(&_lock, NULL);
     _lru = [_HJLinkedMap new];
     _queue = dispatch_queue_create("com.hj.cache.memory", DISPATCH_QUEUE_SERIAL);
-
+    
     _countLimit = NSUIntegerMax;
     _costLimit = NSUIntegerMax;
     _ageLimit = DBL_MAX;
     _autoTrimInterval = 5.0;
     _shouldRemoveAllObjectsOnMemoryWarning = YES;
     _shouldRemoveAllObjectsWhenEnteringBackground = YES;
-
+    
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(_appDidReceiveMemoryWarningNotification) name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self
