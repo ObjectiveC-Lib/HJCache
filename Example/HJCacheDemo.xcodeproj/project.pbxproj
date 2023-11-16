@@ -16,11 +16,12 @@
 		55A811822229223A00226AE5 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 55A811812229223A00226AE5 /* QuartzCore.framework */; };
 		55A811842229224300226AE5 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 55A811832229224300226AE5 /* UIKit.framework */; };
 		55A811862229224F00226AE5 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 55A811852229224F00226AE5 /* libsqlite3.tbd */; };
-		BB1021CDAC2F984510B4AB2B /* libPods-HJCacheDemo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F28B69A2F490AD50744EB603 /* libPods-HJCacheDemo.a */; };
+		BB2C74F01ACC0EB79F2993E0 /* Pods_HJCacheDemo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 422B3ECD79945D9BFED4AC96 /* Pods_HJCacheDemo.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		02C4BB0DC2539B78E7795216 /* Pods-HJCacheDemo.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-HJCacheDemo.release.xcconfig"; path = "Target Support Files/Pods-HJCacheDemo/Pods-HJCacheDemo.release.xcconfig"; sourceTree = "<group>"; };
+		422B3ECD79945D9BFED4AC96 /* Pods_HJCacheDemo.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_HJCacheDemo.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		55A811582229052900226AE5 /* HJCacheDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HJCacheDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		55A8115B2229052900226AE5 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		55A8115C2229052900226AE5 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
@@ -35,7 +36,6 @@
 		55A811832229224300226AE5 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		55A811852229224F00226AE5 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		6D5C7960940E841E32769F74 /* Pods-HJCacheDemo.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-HJCacheDemo.debug.xcconfig"; path = "Target Support Files/Pods-HJCacheDemo/Pods-HJCacheDemo.debug.xcconfig"; sourceTree = "<group>"; };
-		F28B69A2F490AD50744EB603 /* libPods-HJCacheDemo.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-HJCacheDemo.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -46,7 +46,7 @@
 				55A811862229224F00226AE5 /* libsqlite3.tbd in Frameworks */,
 				55A811842229224300226AE5 /* UIKit.framework in Frameworks */,
 				55A811822229223A00226AE5 /* QuartzCore.framework in Frameworks */,
-				BB1021CDAC2F984510B4AB2B /* libPods-HJCacheDemo.a in Frameworks */,
+				BB2C74F01ACC0EB79F2993E0 /* Pods_HJCacheDemo.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -102,7 +102,7 @@
 				55A811852229224F00226AE5 /* libsqlite3.tbd */,
 				55A811832229224300226AE5 /* UIKit.framework */,
 				55A811812229223A00226AE5 /* QuartzCore.framework */,
-				F28B69A2F490AD50744EB603 /* libPods-HJCacheDemo.a */,
+				422B3ECD79945D9BFED4AC96 /* Pods_HJCacheDemo.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -118,6 +118,7 @@
 				55A811542229052900226AE5 /* Sources */,
 				55A811552229052900226AE5 /* Frameworks */,
 				55A811562229052900226AE5 /* Resources */,
+				EF03B11A85620A99CA7A33C0 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -194,6 +195,23 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		EF03B11A85620A99CA7A33C0 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-HJCacheDemo/Pods-HJCacheDemo-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-HJCacheDemo/Pods-HJCacheDemo-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-HJCacheDemo/Pods-HJCacheDemo-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */

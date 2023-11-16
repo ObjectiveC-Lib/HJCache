@@ -16,7 +16,7 @@
 #import "YYImage.h"
 #endif
 
-static inline dispatch_queue_t HJCacheImageCacheIOQueue() {
+static inline dispatch_queue_t HJCacheImageCacheIOQueue(void) {
     return dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
 }
 
@@ -42,7 +42,7 @@ static inline dispatch_queue_t HJCacheImageCacheIOQueue() {
 - (instancetype)initWithPath:(NSString *)path {
     if (path.length == 0) return nil;
     NSString *name = [path lastPathComponent];
-
+    
     HJMemoryCache *memoryCache = [HJMemoryCache new];
     memoryCache.name = name;
     memoryCache.shouldRemoveAllObjectsOnMemoryWarning = YES;

@@ -66,7 +66,7 @@
 
 - (void)containsObjectForKey:(NSString *)key withBlock:(nullable void(^)(NSString *key, BOOL contains))block {
     if (!block) return;
-
+    
     if ([_memoryCache containsObjectForKey:key]) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             block(key, YES);

@@ -18,7 +18,7 @@
 static const int extended_data_key;
 
 /// Free disk space in bytes.
-static int64_t _HJDiskSpaceFree() {
+static int64_t _HJDiskSpaceFree(void) {
     NSError *error = nil;
     NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfFileSystemForPath:NSHomeDirectory() error:&error];
     if (error) return -1;
@@ -57,7 +57,7 @@ static inline NSString * _Nonnull _HJFileNameForKey(NSString * _Nullable key) {
 static NSMapTable *_globalInstances;
 static dispatch_semaphore_t _globalInstancesLock;
 
-static void _HJDiskCacheInitGlobal() {
+static void _HJDiskCacheInitGlobal(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         _globalInstancesLock = dispatch_semaphore_create(1);
@@ -92,7 +92,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
 
 - (void)_trimRecursively {
     __weak typeof (self) _self = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_autoTrimInterval * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_autoTrimInterval * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __strong typeof(_self) self = _self;
         if (!self) return;
         [self _trimInBackground];
@@ -138,16 +138,16 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
 
 - (void)_trimToFreeDiskSpace:(NSUInteger)targetFreeDiskSpace {
     if (targetFreeDiskSpace == 0) return;
-
+    
     int64_t totalBytes = [_kv getItemsSize];
     if (totalBytes <= 0) return;
-
+    
     int64_t diskFreeBytes = _HJDiskSpaceFree();
     if (diskFreeBytes < 0) return;
-
+    
     int64_t needTrimBytes = targetFreeDiskSpace - diskFreeBytes;
     if (needTrimBytes <= 0) return;
-
+    
     int64_t costLimit = totalBytes - needTrimBytes;
     if (costLimit < 0) costLimit = 0;
     [self _trimToCost:(int)costLimit];
@@ -186,10 +186,10 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
 - (nullable instancetype)initWithPath:(NSString *)path inlineThreshold:(NSUInteger)threshold {
     self = [super init];
     if (!self) return nil;
-
+    
     HJDiskCache *globalCache = _HJDiskCacheGetGlobal(path);
     if (globalCache) return globalCache;
-
+    
     HJKVStorageType type;
     if (threshold == 0) {
         type = HJKVStorageTypeFile;
@@ -198,10 +198,10 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     } else {
         type = HJKVStorageTypeMixed;
     }
-
+    
     HJKVStorage *kv = [[HJKVStorage alloc] initWithPath:path type:type];
     if (!kv) return nil;
-
+    
     _kv = kv;
     _path = path;
     _lock = dispatch_semaphore_create(1);
@@ -212,12 +212,12 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     _ageLimit = DBL_MAX;
     _freeDiskSpaceLimit = 0;
     _autoTrimInterval = 60;
-
+    
     [self _trimRecursively];
     _HJDiskCacheSetGlobal(self);
-
+    
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_appWillBeTerminated) name:UIApplicationWillTerminateNotification object:nil];
-
+    
     return self;
 }
 
@@ -247,7 +247,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     HJKVStorageItem *item = [_kv getItemForKey:key];
     Unlock();
     if (!item.value) return nil;
-
+    
     id object = nil;
     if (_customUnarchiveBlock) {
         object = _customUnarchiveBlock(item.value);
@@ -262,15 +262,15 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
             }
         } else {
             @try {
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
                 object = [NSKeyedUnarchiver unarchiveObjectWithData:item.value];
-    #pragma clang diagnostic pop
+#pragma clang diagnostic pop
             } @catch (NSException *exception) {
                 NSLog(@"NSKeyedUnarchiver unarchive failed with exception: %@", exception);
             }
         }
-
+        
     }
     if (object && item.extendedData) {
         [HJDiskCache setExtendedData:item.extendedData toObject:object];
@@ -313,10 +313,10 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
             }
         } else {
             @try {
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
                 value = [NSKeyedArchiver archivedDataWithRootObject:object];
-    #pragma clang diagnostic pop
+#pragma clang diagnostic pop
             } @catch (NSException *exception) {
                 NSLog(@"NSKeyedArchiver archive failed with exception: %@", exception);
             }
@@ -334,7 +334,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
             filename = [self _filenameForKey:key];
         }
     }
-
+    
     Lock();
     [_kv saveItemWithKey:key value:value filename:filename extendedData:extendedData];
     Unlock();

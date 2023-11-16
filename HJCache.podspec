@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = 'HJCache'
-  s.version      = '1.0.7'
+  s.version      = '1.0.8'
   
   s.ios.deployment_target = '9.0'
   
@@ -33,5 +33,4 @@ Pod::Spec.new do |s|
     sdbridge.dependency 'HJCache/Core'
     sdbridge.dependency 'SDWebImage'
   end
-  
 end

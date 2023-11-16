@@ -26,7 +26,7 @@ static NSString *const kTrashDirectoryName = @"trash";
 
 
 /// Returns nil in App Extension.
-static UIApplication *_HJSharedApplication() {
+static UIApplication *_HJSharedApplication(void) {
     static BOOL isAppExtension = NO;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -47,12 +47,12 @@ static UIApplication *_HJSharedApplication() {
 
 @implementation HJKVStorage {
     dispatch_queue_t _trashQueue;
-
+    
     NSString *_path;
     NSString *_dbPath;
     NSString *_dataPath;
     NSString *_trashPath;
-
+    
     sqlite3 *_db;
     CFMutableDictionaryRef _dbStmtCache;
     NSTimeInterval _dbLastOpenErrorTime;
@@ -63,7 +63,7 @@ static UIApplication *_HJSharedApplication() {
 
 - (BOOL)_dbOpen {
     if (_db) return YES;
-
+    
     int result = sqlite3_open(_dbPath.UTF8String, &_db);
     if (result == SQLITE_OK) {
         CFDictionaryKeyCallBacks keyCallbacks = kCFCopyStringDictionaryKeyCallBacks;
@@ -78,7 +78,7 @@ static UIApplication *_HJSharedApplication() {
         _dbStmtCache = NULL;
         _dbLastOpenErrorTime = CACurrentMediaTime();
         _dbOpenErrorCount++;
-
+        
         if (_errorLogsEnabled) {
             NSLog(@"%s line:%d sqlite open failed (%d).", __FUNCTION__, __LINE__, result);
         }
@@ -91,10 +91,10 @@ static UIApplication *_HJSharedApplication() {
     int result = 0;
     BOOL retry = NO;
     BOOL stmtFinalized = NO;
-
+    
     if (_dbStmtCache) CFRelease(_dbStmtCache);
     _dbStmtCache = NULL;
-
+    
     do {
         retry = NO;
         result = sqlite3_close(_db);
@@ -113,9 +113,9 @@ static UIApplication *_HJSharedApplication() {
             }
         }
     } while (retry);
-
+    
     _db = NULL;
-
+    
     return YES;
 }
 
@@ -147,13 +147,13 @@ static UIApplication *_HJSharedApplication() {
     if (sql.length == 0) return NO;
     if (![self _dbCheck]) return NO;
     char *error = NULL;
-
+    
     int result = sqlite3_exec(_db, sql.UTF8String, NULL, NULL, &error);
     if (error) {
         if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite exec error (%d): %s", __FUNCTION__, __LINE__, result, error);
         sqlite3_free(error);
     }
-
+    
     return result == SQLITE_OK;
 }
 
@@ -195,7 +195,7 @@ static UIApplication *_HJSharedApplication() {
     NSString *sql = @"insert or replace into manifest (key, filename, size, inline_data, modification_time, last_access_time, extended_data) values (?1, ?2, ?3, ?4, ?5, ?6, ?7);";
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return NO;
-
+    
     int timestamp = (int)time(NULL);
     sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
     sqlite3_bind_text(stmt, 2, fileName.UTF8String, -1, NULL);
@@ -208,7 +208,7 @@ static UIApplication *_HJSharedApplication() {
     sqlite3_bind_int(stmt, 5, timestamp);
     sqlite3_bind_int(stmt, 6, timestamp);
     sqlite3_bind_blob(stmt, 7, extendedData.bytes, (int)extendedData.length, 0);
-
+    
     int result = sqlite3_step(stmt);
     if (result != SQLITE_DONE) {
         if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite insert error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
@@ -235,14 +235,14 @@ static UIApplication *_HJSharedApplication() {
     if (![self _dbCheck]) return NO;
     int t = (int)time(NULL);
     NSString *sql = [NSString stringWithFormat:@"update manifest set last_access_time = %d where key in (%@);", t, [self _dbJoinedKeys:keys]];
-
+    
     sqlite3_stmt *stmt = NULL;
     int result = sqlite3_prepare_v2(_db, sql.UTF8String, -1, &stmt, NULL);
     if (result != SQLITE_OK) {
         if (_errorLogsEnabled)  NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
         return NO;
     }
-
+    
     [self _dbBindJoinedKeys:keys stmt:stmt fromIndex:1];
     result = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -258,7 +258,7 @@ static UIApplication *_HJSharedApplication() {
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return NO;
     sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
-
+    
     int result = sqlite3_step(stmt);
     if (result != SQLITE_DONE) {
         if (_errorLogsEnabled) NSLog(@"%s line:%d db delete error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
@@ -276,7 +276,7 @@ static UIApplication *_HJSharedApplication() {
         if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
         return NO;
     }
-
+    
     [self _dbBindJoinedKeys:keys stmt:stmt fromIndex:1];
     result = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -324,7 +324,7 @@ static UIApplication *_HJSharedApplication() {
     int last_access_time = sqlite3_column_int(stmt, i++);
     const void *extended_data = sqlite3_column_blob(stmt, i);
     int extended_data_bytes = sqlite3_column_bytes(stmt, i++);
-
+    
     HJKVStorageItem *item = [HJKVStorageItem new];
     if (key) item.key = [NSString stringWithUTF8String:key];
     if (filename && *filename != 0) item.filename = [NSString stringWithUTF8String:filename];
@@ -341,7 +341,7 @@ static UIApplication *_HJSharedApplication() {
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return nil;
     sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
-
+    
     HJKVStorageItem *item = nil;
     int result = sqlite3_step(stmt);
     if (result == SQLITE_ROW) {
@@ -362,14 +362,14 @@ static UIApplication *_HJSharedApplication() {
     } else {
         sql = [NSString stringWithFormat:@"select key, filename, size, inline_data, modification_time, last_access_time, extended_data from manifest where key in (%@)", [self _dbJoinedKeys:keys]];
     }
-
+    
     sqlite3_stmt *stmt = NULL;
     int result = sqlite3_prepare_v2(_db, sql.UTF8String, -1, &stmt, NULL);
     if (result != SQLITE_OK) {
         if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
         return nil;
     }
-
+    
     [self _dbBindJoinedKeys:keys stmt:stmt fromIndex:1];
     NSMutableArray *items = [NSMutableArray new];
     do {
@@ -394,7 +394,7 @@ static UIApplication *_HJSharedApplication() {
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return nil;
     sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
-
+    
     int result = sqlite3_step(stmt);
     if (result == SQLITE_ROW) {
         const void *inline_data = sqlite3_column_blob(stmt, 0);
@@ -437,7 +437,7 @@ static UIApplication *_HJSharedApplication() {
         if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
         return nil;
     }
-
+    
     [self _dbBindJoinedKeys:keys stmt:stmt fromIndex:1];
     NSMutableArray *filenames = [NSMutableArray new];
     do {
@@ -465,7 +465,7 @@ static UIApplication *_HJSharedApplication() {
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return nil;
     sqlite3_bind_int(stmt, 1, size);
-
+    
     NSMutableArray *filenames = [NSMutableArray new];
     do {
         int result = sqlite3_step(stmt);
@@ -491,7 +491,7 @@ static UIApplication *_HJSharedApplication() {
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return nil;
     sqlite3_bind_int(stmt, 1, time);
-
+    
     NSMutableArray *filenames = [NSMutableArray new];
     do {
         int result = sqlite3_step(stmt);
@@ -517,7 +517,7 @@ static UIApplication *_HJSharedApplication() {
     sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
     if (!stmt) return nil;
     sqlite3_bind_int(stmt, 1, count);
-
+    
     NSMutableArray *items = [NSMutableArray new];
     do {
         int result = sqlite3_step(stmt);
@@ -661,7 +661,7 @@ static UIApplication *_HJSharedApplication() {
         NSLog(@"HJKVStorage init error: invalid type: %lu.", (unsigned long)type);
         return nil;
     }
-
+    
     self = [super init];
     _path = path.copy;
     _type = type;
@@ -670,7 +670,7 @@ static UIApplication *_HJSharedApplication() {
     _trashQueue = dispatch_queue_create("com.hj.cache.disk.trash", DISPATCH_QUEUE_SERIAL);
     _dbPath = [path stringByAppendingPathComponent:kDBFileName];
     _errorLogsEnabled = YES;
-
+    
     NSError *error = nil;
     if (![[NSFileManager defaultManager] createDirectoryAtPath:path
                                    withIntermediateDirectories:YES
@@ -684,10 +684,10 @@ static UIApplication *_HJSharedApplication() {
                                    withIntermediateDirectories:YES
                                                     attributes:nil
                                                          error:&error]) {
-            NSLog(@"HJKVStorage init error:%@", error);
-            return nil;
+        NSLog(@"HJKVStorage init error:%@", error);
+        return nil;
     }
-
+    
     if (![self _dbOpen] || ![self _dbInitialize]) {
         [self _dbClose];
         [self _reset];
@@ -697,7 +697,7 @@ static UIApplication *_HJSharedApplication() {
             return nil;
         }
     }
-
+    
     [self _fileEmptyTrashInBackground];
     return self;
 }
@@ -755,7 +755,7 @@ static UIApplication *_HJSharedApplication() {
 
 - (BOOL)removeItemForKeys:(NSArray<NSString *> *)keys {
     if (keys.count == 0) return NO;
-
+    
     switch (_type) {
         case HJKVStorageTypeSQLite: {
             return [self _dbDeleteItemWithKeys:keys];
@@ -775,7 +775,7 @@ static UIApplication *_HJSharedApplication() {
 - (BOOL)removeItemsLargerThanSize:(int)size  {
     if (size == INT_MAX) return YES;
     if (size <= 0) return [self removeAllItems];
-
+    
     switch (_type) {
         case HJKVStorageTypeSQLite: {
             if ([self _dbDeleteItemsWithSizeLargerThan:size]) {
@@ -800,7 +800,7 @@ static UIApplication *_HJSharedApplication() {
 - (BOOL)removeitemsEarlierThanTime:(int)time {
     if (time <= 0) return YES;
     if (time == INT_MAX) return [self removeAllItems];
-
+    
     switch (_type) {
         case HJKVStorageTypeSQLite: {
             if ([self _dbDeleteItemsWithTimeEarlierThan:time]) {
@@ -820,18 +820,18 @@ static UIApplication *_HJSharedApplication() {
             }
         } break;
     }
-
+    
     return NO;
 }
 
 - (BOOL)removeItemsToFitSize:(int)maxSize  {
     if (maxSize == INT_MAX) return YES;
     if (maxSize <= 0) return [self removeAllItems];
-
+    
     int total = [self _dbGetTotalItemSize];
     if (total < 0) return NO;
     if (total <= maxSize) return YES;
-
+    
     NSArray *itemes = nil;
     BOOL suc = NO;
     do {
@@ -855,11 +855,11 @@ static UIApplication *_HJSharedApplication() {
 - (BOOL)removeItemsToFitCount:(int)maxCount {
     if (maxCount == INT_MAX) return YES;
     if (maxCount <= 0) return [self removeAllItems];
-
+    
     int total = [self _dbGetTotalItemCount];
     if (total < 0) return NO;
     if (total <= maxCount) return YES;
-
+    
     NSArray *items = nil;
     BOOL suc = NO;
     do {
@@ -925,7 +925,7 @@ static UIApplication *_HJSharedApplication() {
 
 - (nullable HJKVStorageItem *)getItemForKey:(NSString *)key {
     if (key.length == 0) return nil;
-
+    
     HJKVStorageItem *item = [self _dbGetItemWithKey:key excludeInlineData:NO];
     if (item) {
         [self _dbUpdateAccessTimeWithKey:key];
@@ -948,7 +948,7 @@ static UIApplication *_HJSharedApplication() {
 
 - (nullable NSData *)getItemValueForKey:(NSString *)key {
     if (key.length == 0) return nil;
-
+    
     NSData *value = nil;
     switch (_type) {
         case HJKVStorageTypeFile: {
@@ -985,7 +985,7 @@ static UIApplication *_HJSharedApplication() {
 
 - (nullable NSArray<HJKVStorageItem *> *)getItemsForKeys:(NSArray<NSString *> *)keys {
     if (keys.count == 0) return nil;
-
+    
     NSMutableArray *items = [self _dbGetItemWithKeys:keys excludeInlineData:NO];
     if (_type != HJKVStorageTypeSQLite) {
         for (NSInteger i = 0, max = items.count; i < max; i++) {

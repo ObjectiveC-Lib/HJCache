@@ -12,7 +12,7 @@
 #import "HJMemoryCache.h"
 #import "HJDiskCache.h"
 
-static inline dispatch_queue_t HJCacheVideoCacheIOQueue() {
+static inline dispatch_queue_t HJCacheVideoCacheIOQueue(void) {
     return dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
 }
 
