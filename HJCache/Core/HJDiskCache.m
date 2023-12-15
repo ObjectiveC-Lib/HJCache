@@ -11,9 +11,10 @@
 #import <CommonCrypto/CommonCrypto.h>
 #import <objc/runtime.h>
 #import <time.h>
+#import <pthread/pthread.h>
 
-#define Lock() dispatch_semaphore_wait(self->_lock, DISPATCH_TIME_FOREVER)
-#define Unlock() dispatch_semaphore_signal(self->_lock)
+#define Lock() pthread_mutex_lock(&_lock)
+#define Unlock() pthread_mutex_unlock(&_lock)
 
 static const int extended_data_key;
 
@@ -84,7 +85,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
 
 @implementation HJDiskCache {
     HJKVStorage *_kv;
-    dispatch_semaphore_t _lock;
+    pthread_mutex_t _lock;
     dispatch_queue_t _queue;
 }
 
@@ -92,7 +93,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
 
 - (void)_trimRecursively {
     __weak typeof (self) _self = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_autoTrimInterval * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_autoTrimInterval * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         __strong typeof(_self) self = _self;
         if (!self) return;
         [self _trimInBackground];
@@ -204,7 +205,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     
     _kv = kv;
     _path = path;
-    _lock = dispatch_semaphore_create(1);
+    pthread_mutex_init(&_lock, NULL);
     _queue = dispatch_queue_create("com.hj.cache.disk", DISPATCH_QUEUE_CONCURRENT);
     _inlineThreshold = threshold;
     _countLimit = NSUIntegerMax;

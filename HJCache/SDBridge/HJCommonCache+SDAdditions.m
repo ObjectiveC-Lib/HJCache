@@ -253,7 +253,7 @@ static NSData * SDHJPluginCacheDataWithImageData(UIImage *image, NSData *imageDa
         }
             break;
         case SDImageCacheTypeDisk: {
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
                 [self storeImageToDisk:image imageData:imageData forKey:key completion:completionBlock];
             });
         }
@@ -261,7 +261,7 @@ static NSData * SDHJPluginCacheDataWithImageData(UIImage *image, NSData *imageDa
         case SDImageCacheTypeAll: {
             NSUInteger cost = image.sd_memoryCost;
             [self.memoryCache setObject:image forKey:key cost:cost];
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
                 [self storeImageToDisk:image imageData:imageData forKey:key completion:completionBlock];
             });
         }
