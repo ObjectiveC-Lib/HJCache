@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = 'HJCache'
-  s.version      = '1.0.9'
+  s.version      = '1.0.10'
   
   s.ios.deployment_target = '9.0'
   

@@ -171,6 +171,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self name:UIApplicationWillTerminateNotification object:nil];
+    pthread_mutex_destroy(&_lock);
 }
 
 - (instancetype)init {
