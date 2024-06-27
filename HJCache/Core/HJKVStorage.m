@@ -102,9 +102,11 @@ static UIApplication *_HJSharedApplication(void) {
             if (!stmtFinalized) {
                 stmtFinalized = YES;
                 sqlite3_stmt *stmt;
-                while ((stmt = sqlite3_next_stmt(_db, nil)) != 0) {
-                    sqlite3_finalize(stmt);
-                    retry = YES;
+                if (sqlite3_close_v2(_db) != SQLITE_OK) {
+                    while ((stmt = sqlite3_next_stmt(_db, NULL)) != NULL) {
+                        sqlite3_finalize(stmt);
+                        retry = YES;
+                    }
                 }
             }
         } else if (result != SQLITE_OK) {
