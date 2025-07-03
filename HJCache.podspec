@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name         = 'HJCache'
-  s.version      = '1.0.12'
+  s.version      = '2.0.0'
   
   s.ios.deployment_target = '9.0'
   
@@ -11,7 +11,6 @@ Pod::Spec.new do |s|
   s.author       = { 'navy' => 'lzxy169@gmail.com' }
   
   s.requires_arc = true
-  s.libraries    = 'sqlite3'
   s.frameworks   = 'UIKit', 'CoreFoundation', 'QuartzCore'
   
   s.source_files = 'HJCache/Core/HJCache.h'

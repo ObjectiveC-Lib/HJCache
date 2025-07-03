@@ -196,7 +196,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     if (threshold == 0) {
         type = HJKVStorageTypeFile;
     } else if (threshold == NSUIntegerMax) {
-        type = HJKVStorageTypeSQLite;
+        type = HJKVStorageTypeInline;
     } else {
         type = HJKVStorageTypeMixed;
     }
@@ -331,7 +331,7 @@ static void _HJDiskCacheSetGlobal(HJDiskCache *cache) {
     Unlock();
     
     NSString *filename = nil;
-    if (type != HJKVStorageTypeSQLite) {
+    if (type != HJKVStorageTypeInline) {
         if (value.length > _inlineThreshold) {
             filename = [self _filenameForKey:key];
         }

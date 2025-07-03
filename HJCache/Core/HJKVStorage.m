@@ -9,21 +9,51 @@
 #import <UIKit/UIKit.h>
 #import <time.h>
 
-#if __has_include(<sqlite3.h>)
-#import <sqlite3.h>
-#else
-#import "sqlite3.h"
-#endif
-
 static const NSUInteger kMaxErrorRetryCount = 0;
 static const NSTimeInterval kMinRetryTimeInterval = 2.0;
 static const int kPathLengthMax = PATH_MAX - 64;
-static NSString *const kDBFileName = @"manifest.sqlite";
-static NSString *const kDBShmFileName = @"manifest.sqlite-shm";
-static NSString *const kDBWalFileName = @"manifest.sqlite-wal";
+
 static NSString *const kDataDirectoryName = @"data";
 static NSString *const kTrashDirectoryName = @"trash";
+static NSString *const kManifestFileName = @"manifest.plist";
 
+// 添加文件名生成函数
+static inline NSString *HJSanitizeFileNameString(NSString * _Nullable fileName) {
+    if ([fileName length] == 0) {
+        return fileName;
+    }
+    // note: `:` is the only invalid char on Apple file system
+    // but `/` or `\` is valid
+    // \0 is also special case (which cause Foundation API treat the C string as EOF)
+    NSCharacterSet* illegalFileNameCharacters = [NSCharacterSet characterSetWithCharactersInString:@"\0:"];
+    return [[fileName componentsSeparatedByCharactersInSet:illegalFileNameCharacters] componentsJoinedByString:@""];
+}
+
+static inline NSString * _Nonnull HJFileNameForKey(NSString * _Nullable key) {
+    if (key.length == 0) {
+        return @"";
+    }
+    
+    // 使用 MD5 哈希生成文件名
+    const char *str = key.UTF8String;
+    if (str == NULL) {
+        str = "";
+    }
+    
+    // 简单的哈希算法，避免依赖 CommonCrypto
+    unsigned long hash = 5381;
+    int c;
+    while ((c = *str++)) {
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+    }
+    
+    NSString *ext = key.pathExtension;
+    ext = HJSanitizeFileNameString(ext);
+    
+    NSString *filename = [NSString stringWithFormat:@"%lx%@",
+                          hash, ext.length == 0 ? @"" : [NSString stringWithFormat:@".%@", ext]];
+    return filename;
+}
 
 /// Returns nil in App Extension.
 static UIApplication *_HJSharedApplication(void) {
@@ -40,550 +70,60 @@ static UIApplication *_HJSharedApplication(void) {
 #pragma clang diagnostic pop
 }
 
-
 @implementation HJKVStorageItem
 @end
 
-
 @implementation HJKVStorage {
-    dispatch_queue_t _trashQueue;
-    
     NSString *_path;
-    NSString *_dbPath;
     NSString *_dataPath;
     NSString *_trashPath;
+    NSString *_manifestPath;
     
-    sqlite3 *_db;
-    CFMutableDictionaryRef _dbStmtCache;
-    NSTimeInterval _dbLastOpenErrorTime;
-    NSUInteger _dbOpenErrorCount;
+    // 添加 NSFileManager 和 manifest 字典
+    NSFileManager *_fileManager;
+    NSMutableDictionary *_manifest;
+    dispatch_queue_t _manifestQueue;
+    dispatch_queue_t _trashQueue;
 }
 
-#pragma mark - DB
+#pragma mark - Manifest Management
 
-- (BOOL)_dbOpen {
-    if (_db) return YES;
+- (BOOL)_loadManifest {
+    if (!_manifestPath) return NO;
     
-    int result = sqlite3_open(_dbPath.UTF8String, &_db);
-    if (result == SQLITE_OK) {
-        CFDictionaryKeyCallBacks keyCallbacks = kCFCopyStringDictionaryKeyCallBacks;
-        CFDictionaryValueCallBacks valueCallbacks = {0};
-        _dbStmtCache = CFDictionaryCreateMutable(CFAllocatorGetDefault(), 0, &keyCallbacks, &valueCallbacks);
-        _dbLastOpenErrorTime = 0;
-        _dbOpenErrorCount = 0;
-        return YES;
-    } else {
-        _db = NULL;
-        if (_dbStmtCache) CFRelease(_dbStmtCache);
-        _dbStmtCache = NULL;
-        _dbLastOpenErrorTime = CACurrentMediaTime();
-        _dbOpenErrorCount++;
-        
-        if (_errorLogsEnabled) {
-            NSLog(@"%s line:%d sqlite open failed (%d).", __FUNCTION__, __LINE__, result);
+    NSData *data = [NSData dataWithContentsOfFile:_manifestPath];
+    if (data) {
+        NSDictionary *dict = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:nil];
+        if ([dict isKindOfClass:[NSDictionary class]]) {
+            _manifest = [dict mutableCopy];
+            return YES;
         }
-        return NO;
     }
-}
-
-- (BOOL)_dbClose {
-    if (!_db) return YES;
-    int result = 0;
-    BOOL retry = NO;
-    BOOL stmtFinalized = NO;
     
-    if (_dbStmtCache) CFRelease(_dbStmtCache);
-    _dbStmtCache = NULL;
-    
-    do {
-        retry = NO;
-        result = sqlite3_close(_db);
-        if (result == SQLITE_BUSY || result == SQLITE_LOCKED) {
-            if (!stmtFinalized) {
-                stmtFinalized = YES;
-                sqlite3_stmt *stmt;
-                if (sqlite3_close_v2(_db) != SQLITE_OK) {
-                    while ((stmt = sqlite3_next_stmt(_db, NULL)) != NULL) {
-                        sqlite3_finalize(stmt);
-                        retry = YES;
-                    }
-                }
-            }
-        } else if (result != SQLITE_OK) {
-            if (_errorLogsEnabled) {
-                NSLog(@"%s line:%d sqlite close failed (%d).", __FUNCTION__, __LINE__, result);
-            }
-        }
-    } while (retry);
-    
-    _db = NULL;
-    
+    _manifest = [NSMutableDictionary new];
     return YES;
 }
 
-- (BOOL)_dbCheck {
-    if (!_db) {
-        if (_dbOpenErrorCount < kMaxErrorRetryCount
-            && CACurrentMediaTime()-_dbLastOpenErrorTime>kMinRetryTimeInterval) {
-            return [self _dbOpen] && [self _dbInitialize];
-        } else {
-            return NO;
-        }
-    }
-    return YES;
-}
-
-
-- (void)_dbCheckpoint {
-    if (![self _dbCheck]) return;
-    // Cause a checkpoint to occur, merge `sqlite-wal` file to `sqlite` file.
-    sqlite3_wal_checkpoint(_db, NULL);
-}
-
-- (BOOL)_dbInitialize {
-    NSString *sql = @"pragma journal_mode = wal; pragma synchronous = normal; create table if not exists manifest (key text, filename text, size integer, inline_data blob, modification_time integer, last_access_time integer, extended_data blob, primary key(key)); create index if not exists last_access_time_idx on manifest(last_access_time);";
-    return [self _dbExecute:sql];
-}
-
-- (BOOL)_dbExecute:(NSString *)sql {
-    if (sql.length == 0) return NO;
-    if (![self _dbCheck]) return NO;
-    char *error = NULL;
+- (BOOL)_saveManifest {
+    if (!_manifestPath || !_manifest) return NO;
     
-    int result = sqlite3_exec(_db, sql.UTF8String, NULL, NULL, &error);
-    if (error) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite exec error (%d): %s", __FUNCTION__, __LINE__, result, error);
-        sqlite3_free(error);
-    }
-    
-    return result == SQLITE_OK;
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:_manifest format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
+    return [data writeToFile:_manifestPath atomically:YES];
 }
 
-- (sqlite3_stmt *)_dbPrepareStmt:(NSString *)sql {
-    if (![self _dbCheck] || sql.length == 0 || !_dbStmtCache) return NULL;
-    sqlite3_stmt *stmt = (sqlite3_stmt *)CFDictionaryGetValue(_dbStmtCache, (__bridge const void *)(sql));
-    if (!stmt) {
-        int result = sqlite3_prepare_v2(_db, sql.UTF8String, -1, &stmt, NULL);
-        if (result != SQLITE_OK) {
-            if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-            return NULL;
-        }
-        CFDictionarySetValue(_dbStmtCache, (__bridge const void *)(sql), stmt);
-    } else {
-        sqlite3_reset(stmt);
-    }
-    return stmt;
+- (NSString *)_filePathForKey:(NSString *)key {
+    if (key.length == 0) return nil;
+    NSString *filename = HJFileNameForKey(key);
+    return [_dataPath stringByAppendingPathComponent:filename];
 }
 
-- (NSString *)_dbJoinedKeys:(NSArray *)keys {
-    NSMutableString *string = [NSMutableString new];
-    for (NSUInteger i = 0,max = keys.count; i < max; i++) {
-        [string appendString:@"?"];
-        if (i + 1 != max) {
-            [string appendString:@","];
-        }
-    }
-    return string;
+- (NSString *)_extendedDataPathForKey:(NSString *)key {
+    if (key.length == 0) return nil;
+    NSString *filename = [HJFileNameForKey(key) stringByAppendingString:@".ext"];
+    return [_dataPath stringByAppendingPathComponent:filename];
 }
 
-- (void)_dbBindJoinedKeys:(NSArray *)keys stmt:(sqlite3_stmt *)stmt fromIndex:(int)index {
-    for (int i = 0, max = (int)keys.count; i < max; i++) {
-        NSString *key = keys[i];
-        sqlite3_bind_text(stmt, index + i, key.UTF8String, -1, NULL);
-    }
-}
-
-- (BOOL)_dbSaveWithKey:(NSString *)key value:(NSData *)value fileName:(NSString *)fileName extendedData:(NSData *)extendedData {
-    NSString *sql = @"insert or replace into manifest (key, filename, size, inline_data, modification_time, last_access_time, extended_data) values (?1, ?2, ?3, ?4, ?5, ?6, ?7);";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return NO;
-    
-    int timestamp = (int)time(NULL);
-    sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
-    sqlite3_bind_text(stmt, 2, fileName.UTF8String, -1, NULL);
-    sqlite3_bind_int(stmt, 3, (int)value.length);
-    if (fileName.length == 0) {
-        sqlite3_bind_blob(stmt, 4, value.bytes, (int)value.length, 0);
-    } else {
-        sqlite3_bind_blob(stmt, 4, NULL, 0, 0);
-    }
-    sqlite3_bind_int(stmt, 5, timestamp);
-    sqlite3_bind_int(stmt, 6, timestamp);
-    sqlite3_bind_blob(stmt, 7, extendedData.bytes, (int)extendedData.length, 0);
-    
-    int result = sqlite3_step(stmt);
-    if (result != SQLITE_DONE) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite insert error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return NO;
-    }
-    return YES;
-}
-
-- (BOOL)_dbUpdateAccessTimeWithKey:(NSString *)key {
-    NSString *sql = @"update manifest set last_access_time = ?1 where key = ?2;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return NO;
-    sqlite3_bind_int(stmt, 1, (int)time(NULL));
-    sqlite3_bind_text(stmt, 2, key.UTF8String, -1, NULL);
-    int result = sqlite3_step(stmt);
-    if (result != SQLITE_DONE) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite update error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return NO;
-    }
-    return YES;
-}
-
-- (BOOL)_dbUpdateAccessTimeWithKeys:(NSArray *)keys {
-    if (![self _dbCheck]) return NO;
-    int t = (int)time(NULL);
-    NSString *sql = [NSString stringWithFormat:@"update manifest set last_access_time = %d where key in (%@);", t, [self _dbJoinedKeys:keys]];
-    
-    sqlite3_stmt *stmt = NULL;
-    int result = sqlite3_prepare_v2(_db, sql.UTF8String, -1, &stmt, NULL);
-    if (result != SQLITE_OK) {
-        if (_errorLogsEnabled)  NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return NO;
-    }
-    
-    [self _dbBindJoinedKeys:keys stmt:stmt fromIndex:1];
-    result = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    if (result != SQLITE_DONE) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite update error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return NO;
-    }
-    return YES;
-}
-
-- (BOOL)_dbDeleteItemWithKey:(NSString *)key {
-    NSString *sql = @"delete from manifest where key = ?1;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return NO;
-    sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
-    
-    int result = sqlite3_step(stmt);
-    if (result != SQLITE_DONE) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d db delete error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return NO;
-    }
-    return YES;
-}
-
-- (BOOL)_dbDeleteItemWithKeys:(NSArray *)keys {
-    if (![self _dbCheck]) return NO;
-    NSString *sql = [NSString stringWithFormat:@"delete from mainfest where key in (%@);", [self _dbJoinedKeys:keys]];
-    sqlite3_stmt *stmt = NULL;
-    int result = sqlite3_prepare_v2(_db, sql.UTF8String, -1, &stmt, NULL);
-    if (result != SQLITE_OK) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return NO;
-    }
-    
-    [self _dbBindJoinedKeys:keys stmt:stmt fromIndex:1];
-    result = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    if (result == SQLITE_ERROR) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite delete error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return NO;
-    }
-    return YES;
-}
-
-- (BOOL)_dbDeleteItemsWithSizeLargerThan:(int)size {
-    NSString *sql = @"delete from manifest where size > ?1;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return NO;
-    sqlite3_bind_int(stmt, 1, size);
-    int result = sqlite3_step(stmt);
-    if (result != SQLITE_DONE) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite delete error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return NO;
-    }
-    return YES;
-}
-
-- (BOOL)_dbDeleteItemsWithTimeEarlierThan:(int)time {
-    NSString *sql = @"delete from manifest where last_access_time < ?1;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return NO;
-    sqlite3_bind_int(stmt, 1, time);
-    int result = sqlite3_step(stmt);
-    if (result != SQLITE_DONE) {
-        if (_errorLogsEnabled)  NSLog(@"%s line:%d sqlite delete error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return NO;
-    }
-    return YES;
-}
-
-- (HJKVStorageItem *)_dbGetItemFromStmt:(sqlite3_stmt *)stmt excludeInlineData:(BOOL)excludeInlineData {
-    int i = 0;
-    char *key = (char *)sqlite3_column_text(stmt, i++);
-    char *filename = (char *)sqlite3_column_text(stmt, i++);
-    int size = sqlite3_column_int(stmt, i++);
-    const void *inline_data = excludeInlineData ? NULL : sqlite3_column_blob(stmt, i);
-    int inline_data_bytes = excludeInlineData ? 0 : sqlite3_column_bytes(stmt, i++);
-    int modification_time = sqlite3_column_int(stmt, i++);
-    int last_access_time = sqlite3_column_int(stmt, i++);
-    const void *extended_data = sqlite3_column_blob(stmt, i);
-    int extended_data_bytes = sqlite3_column_bytes(stmt, i++);
-    
-    HJKVStorageItem *item = [HJKVStorageItem new];
-    if (key) item.key = [NSString stringWithUTF8String:key];
-    if (filename && *filename != 0) item.filename = [NSString stringWithUTF8String:filename];
-    item.size = size;
-    if (inline_data_bytes > 0 && inline_data) item.value = [NSData dataWithBytes:inline_data length:inline_data_bytes];
-    item.modTime = modification_time;
-    item.accessTime = last_access_time;
-    if (extended_data_bytes > 0 && extended_data) item.extendedData = [NSData dataWithBytes:extended_data length:extended_data_bytes];
-    return item;
-}
-
-- (HJKVStorageItem *)_dbGetItemWithKey:(NSString *)key excludeInlineData:(BOOL)excludeInlineData {
-    NSString *sql = excludeInlineData ? @"select key, filename, size, modification_time, last_access_time, extended_data from manifest where key = ?1;" : @"select key, filename, size, inline_data, modification_time, last_access_time, extended_data from manifest where key = ?1;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return nil;
-    sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
-    
-    HJKVStorageItem *item = nil;
-    int result = sqlite3_step(stmt);
-    if (result == SQLITE_ROW) {
-        item = [self _dbGetItemFromStmt:stmt excludeInlineData:excludeInlineData];
-    } else {
-        if (result != SQLITE_DONE) {
-            if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        }
-    }
-    return item;
-}
-
-- (NSMutableArray *)_dbGetItemWithKeys:(NSArray *)keys excludeInlineData:(BOOL)excludeInlineData {
-    if (![self _dbCheck]) return nil;
-    NSString *sql;
-    if (excludeInlineData) {
-        sql = [NSString stringWithFormat:@"select key, filename, size, modification_time, last_access_time, extended_data from manifest where key in (%@);", [self _dbJoinedKeys:keys]];
-    } else {
-        sql = [NSString stringWithFormat:@"select key, filename, size, inline_data, modification_time, last_access_time, extended_data from manifest where key in (%@)", [self _dbJoinedKeys:keys]];
-    }
-    
-    sqlite3_stmt *stmt = NULL;
-    int result = sqlite3_prepare_v2(_db, sql.UTF8String, -1, &stmt, NULL);
-    if (result != SQLITE_OK) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return nil;
-    }
-    
-    [self _dbBindJoinedKeys:keys stmt:stmt fromIndex:1];
-    NSMutableArray *items = [NSMutableArray new];
-    do {
-        result = sqlite3_step(stmt);
-        if (result == SQLITE_ROW) {
-            HJKVStorageItem *item = [self _dbGetItemFromStmt:stmt excludeInlineData:excludeInlineData];
-            if (item) [items addObject:item];
-        } else if (result == SQLITE_DONE) {
-            break;
-        } else {
-            if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-            items = nil;
-            break;
-        }
-    } while (1);
-    sqlite3_finalize(stmt);
-    return items;
-}
-
-- (NSData *)_dbGetValueWithKey:(NSString *)key {
-    NSString *sql = @"select inline_data from manifest where key = ?1;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return nil;
-    sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
-    
-    int result = sqlite3_step(stmt);
-    if (result == SQLITE_ROW) {
-        const void *inline_data = sqlite3_column_blob(stmt, 0);
-        int inline_data_bytes = sqlite3_column_bytes(stmt, 0);
-        if (!inline_data || inline_data_bytes <= 0) return nil;
-        return [NSData dataWithBytes:inline_data length:inline_data_bytes];
-    } else {
-        if (result != SQLITE_DONE) {
-            if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        }
-        return nil;
-    }
-}
-
-- (NSString *)_dbGetFilenameWithKey:(NSString *)key {
-    NSString *sql = @"select filename from manifest where key = ?1;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return nil;
-    sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
-    int result = sqlite3_step(stmt);
-    if (result == SQLITE_ROW) {
-        char *filename = (char *)sqlite3_column_text(stmt, 0);
-        if (filename && *filename != 0) {
-            return [NSString stringWithUTF8String:filename];
-        }
-    } else {
-        if (result != SQLITE_DONE) {
-            if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        }
-    }
-    return nil;
-}
-
-- (NSMutableArray *)_dbGetFilenamesWithKeys:(NSArray *)keys {
-    if (![self _dbCheck]) return nil;
-    NSString *sql = [NSString stringWithFormat:@"select filename from manifest where key in (%@);", [self _dbJoinedKeys:keys]];
-    sqlite3_stmt *stmt = NULL;
-    int result = sqlite3_prepare_v2(_db, sql.UTF8String, -1, &stmt, NULL);
-    if (result != SQLITE_OK) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite stmt prepare error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return nil;
-    }
-    
-    [self _dbBindJoinedKeys:keys stmt:stmt fromIndex:1];
-    NSMutableArray *filenames = [NSMutableArray new];
-    do {
-        result = sqlite3_step(stmt);
-        if (result == SQLITE_ROW) {
-            char *filename = (char *)sqlite3_column_text(stmt, 0);
-            if (filename && *filename != 0) {
-                NSString *name = [NSString stringWithUTF8String:filename];
-                if (name) [filenames addObject:name];
-            }
-        } else if (result == SQLITE_DONE) {
-            break;
-        } else {
-            if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-            filenames = nil;
-            break;
-        }
-    } while (1);
-    sqlite3_finalize(stmt);
-    return filenames;
-}
-
-- (NSMutableArray *)_dbGetFilenamesWithSizeLargerThan:(int)size {
-    NSString *sql = @"select filename from manifest where size > ?1 and filename is not null;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return nil;
-    sqlite3_bind_int(stmt, 1, size);
-    
-    NSMutableArray *filenames = [NSMutableArray new];
-    do {
-        int result = sqlite3_step(stmt);
-        if (result == SQLITE_ROW) {
-            char *filename = (char *)sqlite3_column_text(stmt, 0);
-            if (filename && *filename != 0) {
-                NSString *name = [NSString stringWithUTF8String:filename];
-                if (name) [filenames addObject:name];
-            }
-        } else if (result == SQLITE_DONE) {
-            break;
-        } else {
-            if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-            filenames = nil;
-            break;
-        }
-    } while (1);
-    return filenames;
-}
-
-- (NSMutableArray *)_dbGetFilenamesWithTimeEarlierThan:(int)time {
-    NSString *sql = @"select filename from manifest where last_access_time < ?1 and filename is not null;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return nil;
-    sqlite3_bind_int(stmt, 1, time);
-    
-    NSMutableArray *filenames = [NSMutableArray new];
-    do {
-        int result = sqlite3_step(stmt);
-        if (result == SQLITE_ROW) {
-            char *filename = (char *)sqlite3_column_text(stmt, 0);
-            if (filename && *filename != 0) {
-                NSString *name = [NSString stringWithUTF8String:filename];
-                if (name) [filenames addObject:name];
-            }
-        } else if (result == SQLITE_DONE) {
-            break;
-        } else {
-            if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-            filenames = nil;
-            break;
-        }
-    } while (1);
-    return filenames;
-}
-
-- (NSMutableArray *)_dbGetItemSizeInfoOrderByTimeAscWithLimit:(int)count {
-    NSString *sql = @"select key, filename, size from manifest order by last_access_time asc limit ?1;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return nil;
-    sqlite3_bind_int(stmt, 1, count);
-    
-    NSMutableArray *items = [NSMutableArray new];
-    do {
-        int result = sqlite3_step(stmt);
-        if (result == SQLITE_ROW) {
-            char *key = (char *)sqlite3_column_text(stmt, 0);
-            char *filename = (char *)sqlite3_column_text(stmt, 1);
-            int size = sqlite3_column_int(stmt, 2);
-            NSString *keyStr = key ? [NSString stringWithUTF8String:key] : nil;
-            if (keyStr) {
-                HJKVStorageItem *item = [HJKVStorageItem new];
-                item.key = key ? [NSString stringWithUTF8String:key] : nil;
-                item.filename = filename ? [NSString stringWithUTF8String:filename] : nil;
-                item.size = size;
-                [items addObject:item];
-            }
-        } else if (result == SQLITE_DONE) {
-            break;
-        } else {
-            if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-            items = nil;
-            break;
-        }
-    } while (1);
-    return items;
-}
-
-- (int)_dbGetItemCountWithKey:(NSString *)key {
-    NSString *sql = @"select count(key) from manifest where key = ?1;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return -1;
-    sqlite3_bind_text(stmt, 1, key.UTF8String, -1, NULL);
-    int result = sqlite3_step(stmt);
-    if (result != SQLITE_ROW) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return -1;
-    }
-    return sqlite3_column_int(stmt, 0);
-}
-
-- (int)_dbGetTotalItemSize {
-    NSString *sql = @"select sum(size) from manifest;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return -1;
-    int result = sqlite3_step(stmt);
-    if (result != SQLITE_ROW) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return -1;
-    }
-    return sqlite3_column_int(stmt, 0);
-}
-
-- (int)_dbGetTotalItemCount {
-    NSString *sql = @"select count(*) from manifest;";
-    sqlite3_stmt *stmt = [self _dbPrepareStmt:sql];
-    if (!stmt) return -1;
-    int result = sqlite3_step(stmt);
-    if (result != SQLITE_ROW) {
-        if (_errorLogsEnabled) NSLog(@"%s line:%d sqlite query error (%d): %s", __FUNCTION__, __LINE__, result, sqlite3_errmsg(_db));
-        return -1;
-    }
-    return sqlite3_column_int(stmt, 0);
-}
-
-#pragma mark - File
+#pragma mark - File Operations
 
 - (BOOL)_fileWriteWithName:(NSString *)filename data:(NSData *)data {
     NSString *path = [_dataPath stringByAppendingPathComponent:filename];
@@ -598,7 +138,7 @@ static UIApplication *_HJSharedApplication(void) {
 
 - (BOOL)_fileDeleteWithName:(NSString *)filename {
     NSString *path = [_dataPath stringByAppendingPathComponent:filename];
-    return [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+    return [_fileManager removeItemAtPath:path error:NULL];
 }
 
 - (BOOL)_fileMoveAllToTrash {
@@ -606,9 +146,9 @@ static UIApplication *_HJSharedApplication(void) {
     CFStringRef uuid = CFUUIDCreateString(NULL, uuidRef);
     CFRelease(uuidRef);
     NSString *tmpPath = [_trashPath stringByAppendingPathComponent:(__bridge NSString *)(uuid)];
-    BOOL suc = [[NSFileManager defaultManager] moveItemAtPath:_dataPath toPath:tmpPath error:nil];
+    BOOL suc = [_fileManager moveItemAtPath:_dataPath toPath:tmpPath error:nil];
     if (suc) {
-        suc = [[NSFileManager defaultManager] createDirectoryAtPath:_dataPath withIntermediateDirectories:YES attributes:nil error:NULL];
+        suc = [_fileManager createDirectoryAtPath:_dataPath withIntermediateDirectories:YES attributes:nil error:NULL];
     }
     CFRelease(uuid);
     return suc;
@@ -627,21 +167,247 @@ static UIApplication *_HJSharedApplication(void) {
     });
 }
 
+#pragma mark - Manifest Operations
+
+- (BOOL)_manifestSaveWithKey:(NSString *)key value:(NSData *)value fileName:(NSString *)fileName extendedData:(NSData *)extendedData {
+    if (!_manifest) return NO;
+    
+    int timestamp = (int)time(NULL);
+    NSMutableDictionary *itemInfo = [NSMutableDictionary new];
+    itemInfo[@"filename"] = fileName ?: @"";
+    itemInfo[@"size"] = @(value.length);
+    itemInfo[@"modification_time"] = @(timestamp);
+    itemInfo[@"last_access_time"] = @(timestamp);
+    
+    _manifest[key] = itemInfo;
+    
+    // 保存扩展数据到单独文件
+    if (extendedData) {
+        NSString *extendedDataPath = [self _extendedDataPathForKey:key];
+        [extendedData writeToFile:extendedDataPath atomically:YES];
+    }
+    
+    return [self _saveManifest];
+}
+
+- (BOOL)_manifestUpdateAccessTimeWithKey:(NSString *)key {
+    if (!_manifest) return NO;
+    
+    NSMutableDictionary *itemInfo = _manifest[key];
+    if (itemInfo) {
+        itemInfo[@"last_access_time"] = @((int)time(NULL));
+        return [self _saveManifest];
+    }
+    return NO;
+}
+
+- (BOOL)_manifestDeleteItemWithKey:(NSString *)key {
+    if (!_manifest) return NO;
+    
+    [_manifest removeObjectForKey:key];
+    
+    // 删除扩展数据文件
+    NSString *extendedDataPath = [self _extendedDataPathForKey:key];
+    [_fileManager removeItemAtPath:extendedDataPath error:NULL];
+    
+    return [self _saveManifest];
+}
+
+- (BOOL)_manifestDeleteItemWithKeys:(NSArray *)keys {
+    if (!_manifest) return NO;
+    
+    for (NSString *key in keys) {
+        [_manifest removeObjectForKey:key];
+        
+        // 删除扩展数据文件
+        NSString *extendedDataPath = [self _extendedDataPathForKey:key];
+        [_fileManager removeItemAtPath:extendedDataPath error:NULL];
+    }
+    
+    return [self _saveManifest];
+}
+
+- (HJKVStorageItem *)_manifestGetItemWithKey:(NSString *)key excludeInlineData:(BOOL)excludeInlineData {
+    if (!_manifest) return nil;
+    
+    NSDictionary *itemInfo = _manifest[key];
+    if (!itemInfo) return nil;
+    
+    HJKVStorageItem *item = [HJKVStorageItem new];
+    item.key = key;
+    item.filename = itemInfo[@"filename"];
+    item.size = [itemInfo[@"size"] intValue];
+    item.modTime = [itemInfo[@"modification_time"] intValue];
+    item.accessTime = [itemInfo[@"last_access_time"] intValue];
+    
+    // 读取扩展数据
+    NSString *extendedDataPath = [self _extendedDataPathForKey:key];
+    if ([_fileManager fileExistsAtPath:extendedDataPath]) {
+        item.extendedData = [NSData dataWithContentsOfFile:extendedDataPath];
+    }
+    
+    // 读取数据值
+    if (!excludeInlineData) {
+        if (item.filename.length > 0) {
+            item.value = [self _fileReadWithName:item.filename];
+        } else {
+            // 如果没有文件名，数据直接存储在文件中
+            NSString *filePath = [self _filePathForKey:key];
+            item.value = [NSData dataWithContentsOfFile:filePath];
+        }
+    }
+    
+    return item;
+}
+
+- (NSMutableArray *)_manifestGetItemWithKeys:(NSArray *)keys excludeInlineData:(BOOL)excludeInlineData {
+    if (!_manifest) return nil;
+    
+    NSMutableArray *items = [NSMutableArray new];
+    for (NSString *key in keys) {
+        HJKVStorageItem *item = [self _manifestGetItemWithKey:key excludeInlineData:excludeInlineData];
+        if (item) {
+            [items addObject:item];
+        }
+    }
+    return items;
+}
+
+- (NSData *)_manifestGetValueWithKey:(NSString *)key {
+    if (!_manifest) return nil;
+    
+    NSDictionary *itemInfo = _manifest[key];
+    if (!itemInfo) return nil;
+    
+    NSString *filename = itemInfo[@"filename"];
+    if (filename.length > 0) {
+        return [self _fileReadWithName:filename];
+    } else {
+        // 如果没有文件名，数据直接存储在文件中
+        NSString *filePath = [self _filePathForKey:key];
+        return [NSData dataWithContentsOfFile:filePath];
+    }
+}
+
+- (NSString *)_manifestGetFilenameWithKey:(NSString *)key {
+    if (!_manifest) return nil;
+    
+    NSDictionary *itemInfo = _manifest[key];
+    return itemInfo[@"filename"];
+}
+
+- (NSMutableArray *)_manifestGetFilenamesWithKeys:(NSArray *)keys {
+    if (!_manifest) return nil;
+    
+    NSMutableArray *filenames = [NSMutableArray new];
+    for (NSString *key in keys) {
+        NSString *filename = [self _manifestGetFilenameWithKey:key];
+        if (filename.length > 0) {
+            [filenames addObject:filename];
+        }
+    }
+    return filenames;
+}
+
+- (NSMutableArray *)_manifestGetFilenamesWithSizeLargerThan:(int)size {
+    if (!_manifest) return nil;
+    
+    NSMutableArray *filenames = [NSMutableArray new];
+    for (NSString *key in _manifest.allKeys) {
+        NSDictionary *itemInfo = _manifest[key];
+        int itemSize = [itemInfo[@"size"] intValue];
+        if (itemSize > size) {
+            NSString *filename = itemInfo[@"filename"];
+            if (filename.length > 0) {
+                [filenames addObject:filename];
+            }
+        }
+    }
+    return filenames;
+}
+
+- (NSMutableArray *)_manifestGetFilenamesWithTimeEarlierThan:(int)time {
+    if (!_manifest) return nil;
+    
+    NSMutableArray *filenames = [NSMutableArray new];
+    for (NSString *key in _manifest.allKeys) {
+        NSDictionary *itemInfo = _manifest[key];
+        int accessTime = [itemInfo[@"last_access_time"] intValue];
+        if (accessTime < time) {
+            NSString *filename = itemInfo[@"filename"];
+            if (filename.length > 0) {
+                [filenames addObject:filename];
+            }
+        }
+    }
+    return filenames;
+}
+
+- (NSMutableArray *)_manifestGetItemSizeInfoOrderByTimeAscWithLimit:(int)count {
+    if (!_manifest) return nil;
+    
+    // 按访问时间排序
+    NSArray *sortedKeys = [_manifest.allKeys sortedArrayUsingComparator:^NSComparisonResult(NSString *key1, NSString *key2) {
+        NSDictionary *info1 = _manifest[key1];
+        NSDictionary *info2 = _manifest[key2];
+        int time1 = [info1[@"last_access_time"] intValue];
+        int time2 = [info2[@"last_access_time"] intValue];
+        return time1 - time2;
+    }];
+    
+    NSMutableArray *items = [NSMutableArray new];
+    int limit = MIN(count, (int)sortedKeys.count);
+    for (int i = 0; i < limit; i++) {
+        NSString *key = sortedKeys[i];
+        NSDictionary *itemInfo = _manifest[key];
+        
+        HJKVStorageItem *item = [HJKVStorageItem new];
+        item.key = key;
+        item.filename = itemInfo[@"filename"];
+        item.size = [itemInfo[@"size"] intValue];
+        [items addObject:item];
+    }
+    return items;
+}
+
+- (int)_manifestGetItemCountWithKey:(NSString *)key {
+    if (!_manifest) return 0;
+    return _manifest[key] ? 1 : 0;
+}
+
+- (int)_manifestGetTotalItemSize {
+    if (!_manifest) return 0;
+    
+    int totalSize = 0;
+    for (NSDictionary *itemInfo in _manifest.allValues) {
+        totalSize += [itemInfo[@"size"] intValue];
+    }
+    return totalSize;
+}
+
+- (int)_manifestGetTotalItemCount {
+    if (!_manifest) return 0;
+    return (int)_manifest.count;
+}
+
 #pragma mark - Private
 
 - (void)_reset {
-    [[NSFileManager defaultManager] removeItemAtPath:[_path stringByAppendingPathComponent:kDBFileName] error:nil];
-    [[NSFileManager defaultManager] removeItemAtPath:[_path stringByAppendingPathComponent:kDBShmFileName] error:nil];
-    [[NSFileManager defaultManager] removeItemAtPath:[_path stringByAppendingPathComponent:kDBWalFileName] error:nil];
+    // 删除 manifest 文件
+    [_fileManager removeItemAtPath:_manifestPath error:nil];
+    
     [self _fileMoveAllToTrash];
     [self _fileEmptyTrashInBackground];
+    
+    // 重新初始化 manifest
+    _manifest = [NSMutableDictionary new];
+    [self _saveManifest];
 }
 
 #pragma mark - Initializer
 
 - (void)dealloc {
     UIBackgroundTaskIdentifier taskID = [_HJSharedApplication() beginBackgroundTaskWithExpirationHandler:^{}];
-    [self _dbClose];
     if (taskID != UIBackgroundTaskInvalid) {
         [_HJSharedApplication() endBackgroundTask:taskID];
     }
@@ -669,33 +435,34 @@ static UIApplication *_HJSharedApplication(void) {
     _type = type;
     _dataPath = [path stringByAppendingPathComponent:kDataDirectoryName];
     _trashPath = [path stringByAppendingPathComponent:kTrashDirectoryName];
+    _manifestPath = [path stringByAppendingPathComponent:kManifestFileName];
     _trashQueue = dispatch_queue_create("com.hj.cache.disk.trash", DISPATCH_QUEUE_SERIAL);
-    _dbPath = [path stringByAppendingPathComponent:kDBFileName];
+    _manifestQueue = dispatch_queue_create("com.hj.cache.disk.manifest", DISPATCH_QUEUE_SERIAL);
+    _fileManager = [NSFileManager new];
     _errorLogsEnabled = YES;
     
     NSError *error = nil;
-    if (![[NSFileManager defaultManager] createDirectoryAtPath:path
-                                   withIntermediateDirectories:YES
-                                                    attributes:nil
-                                                         error:&error] ||
-        ![[NSFileManager defaultManager] createDirectoryAtPath:[path stringByAppendingPathComponent:kDataDirectoryName]
-                                   withIntermediateDirectories:YES
-                                                    attributes:nil
-                                                         error:&error] ||
-        ![[NSFileManager defaultManager] createDirectoryAtPath:[path stringByAppendingPathComponent:kTrashDirectoryName]
-                                   withIntermediateDirectories:YES
-                                                    attributes:nil
-                                                         error:&error]) {
+    if (![_fileManager createDirectoryAtPath:path
+                 withIntermediateDirectories:YES
+                                  attributes:nil
+                                       error:&error] ||
+        ![_fileManager createDirectoryAtPath:[path stringByAppendingPathComponent:kDataDirectoryName]
+                 withIntermediateDirectories:YES
+                                  attributes:nil
+                                       error:&error] ||
+        ![_fileManager createDirectoryAtPath:[path stringByAppendingPathComponent:kTrashDirectoryName]
+                 withIntermediateDirectories:YES
+                                  attributes:nil
+                                       error:&error]) {
         NSLog(@"HJKVStorage init error:%@", error);
         return nil;
     }
     
-    if (![self _dbOpen] || ![self _dbInitialize]) {
-        [self _dbClose];
+    // 初始化 manifest
+    if (![self _loadManifest]) {
         [self _reset];
-        if (![self _dbOpen] || ![self _dbInitialize]) {
-            [self _dbClose];
-            NSLog(@"HJKVStorage init error: fail to open sqlite db.");
+        if (![self _loadManifest]) {
+            NSLog(@"HJKVStorage init error: fail to load manifest.");
             return nil;
         }
     }
@@ -715,23 +482,31 @@ static UIApplication *_HJSharedApplication(void) {
     return [self saveItemWithKey:key value:value filename:nil extendedData:nil];
 }
 
-- (BOOL)saveItemWithKey:(NSString *)key value:(NSData *)value
-               filename:(nullable NSString *)filename extendedData:(nullable NSData *)extendedData {
+- (BOOL)saveItemWithKey:(NSString *)key
+                  value:(NSData *)value
+               filename:(nullable NSString *)filename
+           extendedData:(nullable NSData *)extendedData {
     if (key.length == 0 || value.length == 0) return NO;
     if (_type == HJKVStorageTypeFile && filename.length == 0) return NO;
+    
     if (filename.length) {
         if (![self _fileWriteWithName:filename data:value]) return NO;
-        if (![self _dbSaveWithKey:key value:value fileName:filename extendedData:extendedData]) {
+        if (![self _manifestSaveWithKey:key value:value fileName:filename extendedData:extendedData]) {
             [self _fileDeleteWithName:filename];
             return NO;
         }
         return YES;
     } else {
-        if (_type != HJKVStorageTypeSQLite) {
-            NSString *filename = [self _dbGetFilenameWithKey:key];
+        if (_type != HJKVStorageTypeInline) {
+            NSString *filename = [self _manifestGetFilenameWithKey:key];
             if (filename) [self _fileDeleteWithName:filename];
         }
-        return [self _dbSaveWithKey:key value:value fileName:nil extendedData:extendedData];
+        
+        // 直接保存到文件
+        NSString *filePath = [self _filePathForKey:key];
+        if (![value writeToFile:filePath atomically:YES]) return NO;
+        
+        return [self _manifestSaveWithKey:key value:value fileName:nil extendedData:extendedData];
     }
 }
 
@@ -740,16 +515,20 @@ static UIApplication *_HJSharedApplication(void) {
 - (BOOL)removeItemForKey:(NSString *)key {
     if (key.length == 0) return NO;
     switch (_type) {
-        case HJKVStorageTypeSQLite: {
-            return [self _dbDeleteItemWithKey:key];
+        case HJKVStorageTypeInline: {
+            return [self _manifestDeleteItemWithKey:key];
         } break;
         case HJKVStorageTypeFile:
         case HJKVStorageTypeMixed: {
-            NSString *filename = [self _dbGetFilenameWithKey:key];
+            NSString *filename = [self _manifestGetFilenameWithKey:key];
             if (filename) {
                 [self _fileDeleteWithName:filename];
+            } else {
+                // 删除直接存储的文件
+                NSString *filePath = [self _filePathForKey:key];
+                [_fileManager removeItemAtPath:filePath error:NULL];
             }
-            return [self _dbDeleteItemWithKey:key];
+            return [self _manifestDeleteItemWithKey:key];
         } break;
         default: return NO;
     }
@@ -759,16 +538,23 @@ static UIApplication *_HJSharedApplication(void) {
     if (keys.count == 0) return NO;
     
     switch (_type) {
-        case HJKVStorageTypeSQLite: {
-            return [self _dbDeleteItemWithKeys:keys];
+        case HJKVStorageTypeInline: {
+            return [self _manifestDeleteItemWithKeys:keys];
         } break;
         case HJKVStorageTypeFile:
         case HJKVStorageTypeMixed: {
-            NSArray *filenames = [self _dbGetFilenamesWithKeys:keys];
+            NSArray *filenames = [self _manifestGetFilenamesWithKeys:keys];
             for (NSString *filename in filenames) {
                 [self _fileDeleteWithName:filename];
             }
-            return [self _dbDeleteItemWithKeys:keys];
+            
+            // 删除直接存储的文件
+            for (NSString *key in keys) {
+                NSString *filePath = [self _filePathForKey:key];
+                [_fileManager removeItemAtPath:filePath error:NULL];
+            }
+            
+            return [self _manifestDeleteItemWithKeys:keys];
         } break;
         default: return NO;
     }
@@ -779,21 +565,35 @@ static UIApplication *_HJSharedApplication(void) {
     if (size <= 0) return [self removeAllItems];
     
     switch (_type) {
-        case HJKVStorageTypeSQLite: {
-            if ([self _dbDeleteItemsWithSizeLargerThan:size]) {
-                [self _dbCheckpoint];
-                return YES;
+        case HJKVStorageTypeInline: {
+            // 获取需要删除的键
+            NSMutableArray *keysToDelete = [NSMutableArray new];
+            for (NSString *key in _manifest.allKeys) {
+                NSDictionary *itemInfo = _manifest[key];
+                int itemSize = [itemInfo[@"size"] intValue];
+                if (itemSize > size) {
+                    [keysToDelete addObject:key];
+                }
             }
+            return [self removeItemForKeys:keysToDelete];
         } break;
         case HJKVStorageTypeFile:
         case HJKVStorageTypeMixed: {
-            NSArray *filenames = [self _dbGetFilenamesWithSizeLargerThan:size];
+            NSArray *filenames = [self _manifestGetFilenamesWithSizeLargerThan:size];
             for (NSString *name in filenames) {
                 [self _fileDeleteWithName:name];
             }
-            if ([self _dbDeleteItemsWithSizeLargerThan:size]) {
-                [self _dbCheckpoint];
+            
+            // 获取需要删除的键
+            NSMutableArray *keysToDelete = [NSMutableArray new];
+            for (NSString *key in _manifest.allKeys) {
+                NSDictionary *itemInfo = _manifest[key];
+                int itemSize = [itemInfo[@"size"] intValue];
+                if (itemSize > size) {
+                    [keysToDelete addObject:key];
+                }
             }
+            return [self removeItemForKeys:keysToDelete];
         } break;
     }
     return NO;
@@ -804,22 +604,35 @@ static UIApplication *_HJSharedApplication(void) {
     if (time == INT_MAX) return [self removeAllItems];
     
     switch (_type) {
-        case HJKVStorageTypeSQLite: {
-            if ([self _dbDeleteItemsWithTimeEarlierThan:time]) {
-                [self _dbCheckpoint];
-                return YES;
+        case HJKVStorageTypeInline: {
+            // 获取需要删除的键
+            NSMutableArray *keysToDelete = [NSMutableArray new];
+            for (NSString *key in _manifest.allKeys) {
+                NSDictionary *itemInfo = _manifest[key];
+                int accessTime = [itemInfo[@"last_access_time"] intValue];
+                if (accessTime < time) {
+                    [keysToDelete addObject:key];
+                }
             }
+            return [self removeItemForKeys:keysToDelete];
         } break;
         case HJKVStorageTypeFile:
         case HJKVStorageTypeMixed: {
-            NSArray *filenames = [self _dbGetFilenamesWithTimeEarlierThan:time];
+            NSArray *filenames = [self _manifestGetFilenamesWithTimeEarlierThan:time];
             for (NSString *name in filenames) {
                 [self _fileDeleteWithName:name];
             }
-            if ([self _dbDeleteItemsWithTimeEarlierThan:time]) {
-                [self _dbCheckpoint];
-                return YES;
+            
+            // 获取需要删除的键
+            NSMutableArray *keysToDelete = [NSMutableArray new];
+            for (NSString *key in _manifest.allKeys) {
+                NSDictionary *itemInfo = _manifest[key];
+                int accessTime = [itemInfo[@"last_access_time"] intValue];
+                if (accessTime < time) {
+                    [keysToDelete addObject:key];
+                }
             }
+            return [self removeItemForKeys:keysToDelete];
         } break;
     }
     
@@ -830,27 +643,32 @@ static UIApplication *_HJSharedApplication(void) {
     if (maxSize == INT_MAX) return YES;
     if (maxSize <= 0) return [self removeAllItems];
     
-    int total = [self _dbGetTotalItemSize];
+    int total = [self _manifestGetTotalItemSize];
     if (total < 0) return NO;
     if (total <= maxSize) return YES;
     
-    NSArray *itemes = nil;
+    NSArray *items = nil;
     BOOL suc = NO;
     do {
         int perCount = 16;
-        itemes = [self _dbGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
-        for (HJKVStorageItem *item in itemes) {
+        items = [self _manifestGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
+        for (HJKVStorageItem *item in items) {
             if (total > maxSize) {
-                [self _fileDeleteWithName:item.filename];
-                suc = [self _dbDeleteItemWithKey:item.key];
+                if (item.filename) {
+                    [self _fileDeleteWithName:item.filename];
+                } else {
+                    // 删除直接存储的文件
+                    NSString *filePath = [self _filePathForKey:item.key];
+                    [_fileManager removeItemAtPath:filePath error:NULL];
+                }
+                suc = [self _manifestDeleteItemWithKey:item.key];
                 total -= item.size;
             } else {
                 break;
             }
             if (!suc) break;
         }
-    } while (total > maxSize && itemes.count > 0 && suc);
-    if (suc) [self _dbCheckpoint];
+    } while (total > maxSize && items.count > 0 && suc);
     return suc;
 }
 
@@ -858,7 +676,7 @@ static UIApplication *_HJSharedApplication(void) {
     if (maxCount == INT_MAX) return YES;
     if (maxCount <= 0) return [self removeAllItems];
     
-    int total = [self _dbGetTotalItemCount];
+    int total = [self _manifestGetTotalItemCount];
     if (total < 0) return NO;
     if (total <= maxCount) return YES;
     
@@ -866,13 +684,17 @@ static UIApplication *_HJSharedApplication(void) {
     BOOL suc = NO;
     do {
         int perCount = 16;
-        items = [self _dbGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
+        items = [self _manifestGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
         for (HJKVStorageItem *item in items) {
             if (total > maxCount) {
                 if (item.filename) {
                     [self _fileDeleteWithName:item.filename];
+                } else {
+                    // 删除直接存储的文件
+                    NSString *filePath = [self _filePathForKey:item.key];
+                    [_fileManager removeItemAtPath:filePath error:NULL];
                 }
-                suc = [self _dbDeleteItemWithKey:item.key];
+                suc = [self _manifestDeleteItemWithKey:item.key];
                 total--;
             } else {
                 break;
@@ -880,21 +702,17 @@ static UIApplication *_HJSharedApplication(void) {
             if (!suc) break;
         }
     } while (total > maxCount && items.count > 0 && suc);
-    if (suc) [self _dbCheckpoint];
     return suc;
 }
 
 - (BOOL)removeAllItems {
-    if (![self _dbClose]) return NO;
     [self _reset];
-    if (![self _dbOpen]) return NO;
-    if (![self _dbInitialize]) return NO;
     return YES;
 }
 
 - (void)removeAllItemsWithProgressBlock:(nullable void(^)(int removeCount, int totalCount))progress
                                endBlock:(nullable void(^)(BOOL error))end {
-    int total = [self _dbGetTotalItemCount];
+    int total = [self _manifestGetTotalItemCount];
     if (total <= 0) {
         if (end) end(total < 0);
     } else {
@@ -903,13 +721,17 @@ static UIApplication *_HJSharedApplication(void) {
         NSArray *items = nil;
         BOOL suc = NO;
         do {
-            items = [self _dbGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
+            items = [self _manifestGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
             for (HJKVStorageItem *item in items) {
                 if (left > 0) {
                     if (item.filename) {
                         [self _fileDeleteWithName:item.filename];
+                    } else {
+                        // 删除直接存储的文件
+                        NSString *filePath = [self _filePathForKey:item.key];
+                        [_fileManager removeItemAtPath:filePath error:NULL];
                     }
-                    suc = [self _dbDeleteItemWithKey:item.key];
+                    suc = [self _manifestDeleteItemWithKey:item.key];
                     left--;
                 } else {
                     break;
@@ -918,7 +740,6 @@ static UIApplication *_HJSharedApplication(void) {
             }
             if (progress) progress(total - left, total);
         } while (left > 0 && items.count > 0 && suc);
-        if (suc) [self _dbCheckpoint];
         if (end) end(!suc);
     }
 }
@@ -928,13 +749,13 @@ static UIApplication *_HJSharedApplication(void) {
 - (nullable HJKVStorageItem *)getItemForKey:(NSString *)key {
     if (key.length == 0) return nil;
     
-    HJKVStorageItem *item = [self _dbGetItemWithKey:key excludeInlineData:NO];
+    HJKVStorageItem *item = [self _manifestGetItemWithKey:key excludeInlineData:NO];
     if (item) {
-        [self _dbUpdateAccessTimeWithKey:key];
+        [self _manifestUpdateAccessTimeWithKey:key];
         if (item.filename) {
             item.value = [self _fileReadWithName:item.filename];
             if (!item.value) {
-                [self _dbDeleteItemWithKey:key];
+                [self _manifestDeleteItemWithKey:key];
                 item = nil;
             }
         }
@@ -944,7 +765,7 @@ static UIApplication *_HJSharedApplication(void) {
 
 - (nullable HJKVStorageItem *)getItemInfoForKey:(NSString *)key {
     if (key.length == 0) return nil;
-    HJKVStorageItem *item = [self _dbGetItemWithKey:key excludeInlineData:YES];
+    HJKVStorageItem *item = [self _manifestGetItemWithKey:key excludeInlineData:YES];
     return item;
 }
 
@@ -954,33 +775,33 @@ static UIApplication *_HJSharedApplication(void) {
     NSData *value = nil;
     switch (_type) {
         case HJKVStorageTypeFile: {
-            NSString *filename = [self _dbGetFilenameWithKey:key];
+            NSString *filename = [self _manifestGetFilenameWithKey:key];
             if (filename) {
                 value = [self _fileReadWithName:filename];
                 if (!value) {
-                    [self _dbDeleteItemWithKey:key];
+                    [self _manifestDeleteItemWithKey:key];
                     value = nil;
                 }
             }
         } break;
-        case HJKVStorageTypeSQLite: {
-            value = [self _dbGetValueWithKey:key];
+        case HJKVStorageTypeInline: {
+            value = [self _manifestGetValueWithKey:key];
         } break;
         case HJKVStorageTypeMixed: {
-            NSString *filename = [self _dbGetFilenameWithKey:key];
+            NSString *filename = [self _manifestGetFilenameWithKey:key];
             if (filename) {
                 value = [self _fileReadWithName:filename];
                 if (!value) {
-                    [self _dbDeleteItemWithKey:key];
+                    [self _manifestDeleteItemWithKey:key];
                     value = nil;
                 }
             } else {
-                value = [self _dbGetValueWithKey:key];
+                value = [self _manifestGetValueWithKey:key];
             }
         } break;
     }
     if (value) {
-        [self _dbUpdateAccessTimeWithKey:key];
+        [self _manifestUpdateAccessTimeWithKey:key];
     }
     return value;
 }
@@ -988,14 +809,14 @@ static UIApplication *_HJSharedApplication(void) {
 - (nullable NSArray<HJKVStorageItem *> *)getItemsForKeys:(NSArray<NSString *> *)keys {
     if (keys.count == 0) return nil;
     
-    NSMutableArray *items = [self _dbGetItemWithKeys:keys excludeInlineData:NO];
-    if (_type != HJKVStorageTypeSQLite) {
+    NSMutableArray *items = [self _manifestGetItemWithKeys:keys excludeInlineData:NO];
+    if (_type != HJKVStorageTypeInline) {
         for (NSInteger i = 0, max = items.count; i < max; i++) {
             HJKVStorageItem *item = items[i];
             if (item.filename) {
                 item.value = [self _fileReadWithName:item.filename];
                 if (!item.value) {
-                    if (item.key) [self _dbDeleteItemWithKey:item.key];
+                    if (item.key) [self _manifestDeleteItemWithKey:item.key];
                     [items removeObjectAtIndex:i];
                     i--;
                     max--;
@@ -1004,14 +825,17 @@ static UIApplication *_HJSharedApplication(void) {
         }
     }
     if (items.count > 0) {
-        [self _dbUpdateAccessTimeWithKeys:keys];
+        // 更新访问时间
+        for (NSString *key in keys) {
+            [self _manifestUpdateAccessTimeWithKey:key];
+        }
     }
     return items.count ? items : nil;
 }
 
 - (nullable NSArray<HJKVStorageItem *> *)getItemInfoForKeys:(NSArray<NSString *> *)keys {
     if (keys.count == 0) return nil;
-    return [self _dbGetItemWithKeys:keys excludeInlineData:YES];
+    return [self _manifestGetItemWithKeys:keys excludeInlineData:YES];
 }
 
 - (nullable NSDictionary<NSString *, NSData *> *)getItemValueForKeys:(NSArray<NSString *> *)keys {
@@ -1029,15 +853,15 @@ static UIApplication *_HJSharedApplication(void) {
 
 - (BOOL)itemExistForKey:(NSString *)key {
     if (key.length == 0) return NO;
-    return [self _dbGetItemCountWithKey:key] > 0;
+    return [self _manifestGetItemCountWithKey:key] > 0;
 }
 
 - (int)getItemsCount {
-    return [self _dbGetTotalItemCount];
+    return [self _manifestGetTotalItemCount];
 }
 
 - (int)getItemsSize {
-    return [self _dbGetTotalItemSize];
+    return [self _manifestGetTotalItemSize];
 }
 
 @end

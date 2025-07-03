@@ -10,9 +10,9 @@
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSUInteger, HJKVStorageType) {
-    HJKVStorageTypeFile = 0,
-    HJKVStorageTypeSQLite = 1,
-    HJKVStorageTypeMixed = 2,
+    HJKVStorageTypeFile = 0,    // 数据存储在文件中，有文件名
+    HJKVStorageTypeInline = 1,  // 数据直接存储在文件中，没有文件名
+    HJKVStorageTypeMixed = 2,   // 混合模式，根据数据大小决定存储方式
 };
 
 @interface HJKVStorageItem : NSObject
