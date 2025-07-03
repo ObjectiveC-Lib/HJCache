@@ -95,13 +95,32 @@ static UIApplication *_HJSharedApplication(void) {
     if (data) {
         NSDictionary *dict = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:nil];
         if ([dict isKindOfClass:[NSDictionary class]]) {
-            _manifest = [dict mutableCopy];
+            // 深度复制确保所有嵌套对象都是可变的
+            _manifest = [self _deepMutableCopy:dict];
             return YES;
         }
     }
     
     _manifest = [NSMutableDictionary new];
     return YES;
+}
+
+// 深度可变复制方法
+- (NSMutableDictionary *)_deepMutableCopy:(NSDictionary *)dict {
+    NSMutableDictionary *mutableDict = [NSMutableDictionary dictionaryWithCapacity:dict.count];
+    
+    for (NSString *key in dict.allKeys) {
+        id value = dict[key];
+        if ([value isKindOfClass:[NSDictionary class]]) {
+            // 递归处理嵌套字典
+            mutableDict[key] = [self _deepMutableCopy:value];
+        } else {
+            // 其他类型直接赋值
+            mutableDict[key] = value;
+        }
+    }
+    
+    return mutableDict;
 }
 
 - (BOOL)_saveManifest {
