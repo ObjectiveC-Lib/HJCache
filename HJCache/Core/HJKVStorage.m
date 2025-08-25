@@ -518,7 +518,7 @@ static UIApplication *_HJSharedApplication(void) {
     } else {
         if (_type != HJKVStorageTypeInline) {
             NSString *filename = [self _manifestGetFilenameWithKey:key];
-            if (filename) [self _fileDeleteWithName:filename];
+            if (filename.length) [self _fileDeleteWithName:filename];
         }
         
         // 直接保存到文件
@@ -540,7 +540,7 @@ static UIApplication *_HJSharedApplication(void) {
         case HJKVStorageTypeFile:
         case HJKVStorageTypeMixed: {
             NSString *filename = [self _manifestGetFilenameWithKey:key];
-            if (filename) {
+            if (filename.length) {
                 [self _fileDeleteWithName:filename];
             } else {
                 // 删除直接存储的文件
@@ -673,7 +673,7 @@ static UIApplication *_HJSharedApplication(void) {
         items = [self _manifestGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
         for (HJKVStorageItem *item in items) {
             if (total > maxSize) {
-                if (item.filename) {
+                if (item.filename.length) {
                     [self _fileDeleteWithName:item.filename];
                 } else {
                     // 删除直接存储的文件
@@ -706,7 +706,7 @@ static UIApplication *_HJSharedApplication(void) {
         items = [self _manifestGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
         for (HJKVStorageItem *item in items) {
             if (total > maxCount) {
-                if (item.filename) {
+                if (item.filename.length) {
                     [self _fileDeleteWithName:item.filename];
                 } else {
                     // 删除直接存储的文件
@@ -743,7 +743,7 @@ static UIApplication *_HJSharedApplication(void) {
             items = [self _manifestGetItemSizeInfoOrderByTimeAscWithLimit:perCount];
             for (HJKVStorageItem *item in items) {
                 if (left > 0) {
-                    if (item.filename) {
+                    if (item.filename.length) {
                         [self _fileDeleteWithName:item.filename];
                     } else {
                         // 删除直接存储的文件
@@ -771,7 +771,7 @@ static UIApplication *_HJSharedApplication(void) {
     HJKVStorageItem *item = [self _manifestGetItemWithKey:key excludeInlineData:NO];
     if (item) {
         [self _manifestUpdateAccessTimeWithKey:key];
-        if (item.filename) {
+        if (item.filename.length) {
             item.value = [self _fileReadWithName:item.filename];
             if (!item.value) {
                 [self _manifestDeleteItemWithKey:key];
@@ -795,7 +795,7 @@ static UIApplication *_HJSharedApplication(void) {
     switch (_type) {
         case HJKVStorageTypeFile: {
             NSString *filename = [self _manifestGetFilenameWithKey:key];
-            if (filename) {
+            if (filename.length) {
                 value = [self _fileReadWithName:filename];
                 if (!value) {
                     [self _manifestDeleteItemWithKey:key];
@@ -808,7 +808,7 @@ static UIApplication *_HJSharedApplication(void) {
         } break;
         case HJKVStorageTypeMixed: {
             NSString *filename = [self _manifestGetFilenameWithKey:key];
-            if (filename) {
+            if (filename.length) {
                 value = [self _fileReadWithName:filename];
                 if (!value) {
                     [self _manifestDeleteItemWithKey:key];
@@ -832,7 +832,7 @@ static UIApplication *_HJSharedApplication(void) {
     if (_type != HJKVStorageTypeInline) {
         for (NSInteger i = 0, max = items.count; i < max; i++) {
             HJKVStorageItem *item = items[i];
-            if (item.filename) {
+            if (item.filename.length) {
                 item.value = [self _fileReadWithName:item.filename];
                 if (!item.value) {
                     if (item.key) [self _manifestDeleteItemWithKey:item.key];
